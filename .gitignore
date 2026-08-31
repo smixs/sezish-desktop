@@ -1,0 +1,9 @@
+app/.build/
+app/build/
+app/updates/
+.DS_Store
+*_transcript.md
+cloud/.api-key
+implementation-notes.md
+__pycache__/
+workbench.md

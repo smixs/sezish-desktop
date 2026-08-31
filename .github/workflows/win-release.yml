@@ -1,0 +1,73 @@
+name: Windows release
+
+# Builds the signed x64 NSIS installer + updater feed (ADR-0011: release x64 on
+# a windows-latest runner). Artifacts are uploaded; the maintainer downloads and
+# deploys them to dl.sezi.sh/win/ (cx). No Authenticode (ADR-0004) — the updater
+# is minisign-signed via TAURI_SIGNING_PRIVATE_KEY.
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "win-v*"
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: win
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: win
+      # ring (rustls) and tauri-winres need a C/resource toolchain; windows-latest
+      # ships MSVC, add LLVM for llvm-rc + libclang parity with the dev VM.
+      - name: Install LLVM
+        shell: pwsh
+        run: choco install llvm -y
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli --version "^2" --locked
+      - name: Build signed installer
+        shell: pwsh
+        env:
+          SEZISH_CLOUD_ENDPOINT: ${{ secrets.SEZISH_CLOUD_ENDPOINT }}
+          SEZISH_CLOUD_KEY: ${{ secrets.SEZISH_CLOUD_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          LIBCLANG_PATH: C:\Program Files\LLVM\bin
+        run: cargo tauri build --config src-tauri/tauri.conf.json
+      - name: Collect release artifacts + build latest.json
+        shell: pwsh
+        run: |
+          $out = "release-out"
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          $exe = Get-ChildItem -Recurse target\release\bundle\nsis\*-setup.exe | Select-Object -First 1
+          $sig = Get-ChildItem -Recurse target\release\bundle\nsis\*-setup.exe.sig | Select-Object -First 1
+          if (-not $exe -or -not $sig) { throw "NSIS installer or .sig not found" }
+          # Evergreen name for the download page; versioned name stays too.
+          Copy-Item $exe.FullName (Join-Path $out $exe.Name)
+          Copy-Item $exe.FullName (Join-Path $out "sezish-setup.exe")
+          Copy-Item $sig.FullName (Join-Path $out $sig.Name)
+          $version = (Get-Content src-tauri\tauri.conf.json | ConvertFrom-Json).version
+          $signature = Get-Content $sig.FullName -Raw
+          $pubDate = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+          $latest = [ordered]@{
+            version   = $version
+            notes     = "sezish for Windows $version"
+            pub_date  = $pubDate
+            platforms = [ordered]@{
+              "windows-x86_64" = [ordered]@{
+                signature = $signature.Trim()
+                url       = "https://dl.sezi.sh/win/$($exe.Name)"
+              }
+            }
+          }
+          $latest | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $out "latest.json") -Encoding utf8
+          Get-ChildItem $out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sezish-windows
+          path: win/release-out/*
+          if-no-files-found: error

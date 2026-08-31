@@ -1,0 +1,5 @@
+# Throwaway de-risking spikes. NOT a member of win/Cargo.toml, never built by CI,
+# never shipped. Operator runs each with `cargo run --release` on a live Windows box.
+[workspace]
+resolver = "2"
+members = ["hook", "paste", "ort-smoke", "mic"]

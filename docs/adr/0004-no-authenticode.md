@@ -1,0 +1,3 @@
+# Ship unsigned (no Authenticode); updates signed with minisign
+
+We deliberately ship the NSIS installer without an Authenticode certificate: Azure Trusted Signing is geo-blocked for our jurisdiction and classic OV was declined on cost/hassle. SmartScreen will warn on install — the download page documents the "More info → Run anyway" flow (EN/UZ/RU). The updater feed is still cryptographically signed (tauri-plugin-updater, minisign/Ed25519) — the structural analog of our macOS Sparkle+EdDSA setup. Every unsigned OSS dictation app we surveyed hit antivirus false positives; we accept that risk and keep a VirusTotal baseline scan of each release to catch flare-ups early.

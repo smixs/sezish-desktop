@@ -1,0 +1,67 @@
+name: Windows port CI
+
+on:
+  pull_request:
+    paths:
+      - "win/**"
+      - ".github/workflows/win-ci.yml"
+  push:
+    paths:
+      - "win/**"
+      - ".github/workflows/win-ci.yml"
+
+jobs:
+  mac:
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: win
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: win
+      # ADR-0007: authored manifests and a checked-in lockfile must never enable
+      # ort's download-binaries feature.
+      - name: Guard against ort binary downloads
+        shell: bash
+        run: |
+          # Match the feature only where it's actually enabled (quoted), and skip
+          # win/spikes — a throwaway workspace outside CI whose comments mention it.
+          if grep -R --include='Cargo.toml' --include='Cargo.lock' --exclude-dir=spikes -n '"download-binaries"' .; then
+            echo "ADR-0007 forbids the ort download-binaries feature."
+            exit 1
+          fi
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
+
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: win
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: win
+      # Keep the same ADR-0007 guard on both supported workspace platforms.
+      - name: Guard against ort binary downloads
+        shell: bash
+        run: |
+          # Match the feature only where it's actually enabled (quoted), and skip
+          # win/spikes — a throwaway workspace outside CI whose comments mention it.
+          if grep -R --include='Cargo.toml' --include='Cargo.lock' --exclude-dir=spikes -n '"download-binaries"' .; then
+            echo "ADR-0007 forbids the ort download-binaries feature."
+            exit 1
+          fi
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace

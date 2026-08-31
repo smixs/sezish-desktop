@@ -1,0 +1,14 @@
+[package]
+name = "spike-paste"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_System_Memory",
+    "Win32_System_DataExchange",
+    "Win32_System_Ole",
+    "Win32_UI_Input_KeyboardAndMouse",
+] }

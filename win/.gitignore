@@ -1,0 +1,6 @@
+/target/
+/src-tauri/gen/
+# Vendored ONNX Runtime x64 DLLs (Microsoft onnxruntime win-x64 1.22, ADR-0007).
+# Placed in src-tauri on the VM before the x64 release build; must match the x64 app arch.
+/src-tauri/onnxruntime.dll
+/src-tauri/onnxruntime_providers_shared.dll

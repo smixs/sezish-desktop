@@ -1,0 +1,15 @@
+[package]
+name = "sez-history"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+async-trait.workspace = true
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sez-core = { path = "../sez-core" }
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+tempfile = "3"
+tokio.workspace = true

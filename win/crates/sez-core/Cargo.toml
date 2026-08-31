@@ -1,0 +1,14 @@
+[package]
+name = "sez-core"
+version.workspace = true
+edition.workspace = true
+
+[features]
+test-util = []
+
+[dependencies]
+async-trait.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true

@@ -1,0 +1,42 @@
+[package]
+name = "sezish"
+version.workspace = true
+edition.workspace = true
+build = "build.rs"
+
+[dependencies]
+async-trait.workspace = true
+dirs = "6"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sez-asr-cloud = { path = "../crates/sez-asr-cloud" }
+sez-asr-local = { path = "../crates/sez-asr-local", features = ["local-inference"] }
+sez-audio = { path = "../crates/sez-audio" }
+sez-core = { path = "../crates/sez-core" }
+sez-history = { path = "../crates/sez-history" }
+sez-hotkey = { path = "../crates/sez-hotkey" }
+sez-inject = { path = "../crates/sez-inject" }
+tauri = { version = "=2.11.5", features = ["tray-icon"] }
+tauri-plugin-process = "2.3.1"
+tauri-plugin-updater = "2.10.1"
+thiserror.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "sync", "time"] }
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Globalization",
+    "Win32_Media_Audio",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Threading",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_WindowsAndMessaging",
+] }
+winreg = "0.55"
+
+[build-dependencies]
+tauri-build = "=2.6.3"
+
+[dev-dependencies]
+sez-core = { path = "../crates/sez-core", features = ["test-util"] }
+tempfile = "3"

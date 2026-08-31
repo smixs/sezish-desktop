@@ -1,0 +1,117 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+#     "onnx-asr[cpu,hub]>=0.10",
+# ]
+# ///
+"""sezish — offline meeting transcription for macOS: Russian, Uzbek and more, fully local.
+
+Usage: sezish [--large] [--output DIR] audio.mp4 [audio2.m4a ...]
+Writes <basename>_transcript.md next to each source file (or into --output DIR).
+Models: GigaAM Multilingual CTC (ru/uz/kk/ky/en), int8 ONNX, downloaded on first run.
+"""
+
+from __future__ import annotations
+
+import argparse
+import subprocess
+import sys
+import tempfile
+import time
+from datetime import datetime
+from pathlib import Path
+
+MODELS = {
+    "base": "gigaam-multilingual-ctc",
+    "large": "gigaam-multilingual-large-ctc",
+}
+
+
+def fmt_time(seconds: float) -> str:
+    t = int(seconds)
+    h, m, s = t // 3600, (t % 3600) // 60, t % 60
+    return f"{h:02d}:{m:02d}:{s:02d}" if h else f"{m:02d}:{s:02d}"
+
+
+def audio_duration(path: Path) -> float:
+    out = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(path)],
+        capture_output=True, text=True, check=True,
+    ).stdout.strip()
+    return float(out)
+
+
+def decode_to_wav(src: Path, dst: Path) -> None:
+    subprocess.run(
+        ["ffmpeg", "-y", "-v", "error", "-i", str(src), "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", str(dst)],
+        check=True,
+    )
+
+
+def transcribe_file(model, model_name: str, audio: Path, out_dir: Path | None) -> Path:
+    duration = audio_duration(audio)
+    with tempfile.TemporaryDirectory() as tmp:
+        wav = Path(tmp) / "audio.wav"
+        decode_to_wav(audio, wav)
+        start = time.time()
+        segments = list(model.recognize(str(wav)))
+        elapsed = time.time() - start
+
+    md_file = (out_dir or audio.parent) / f"{audio.stem}_transcript.md"
+    lines = [
+        f"# Transcript: {audio.name}",
+        "",
+        f"**Date:** {datetime.now():%Y-%m-%d %H:%M}",
+        f"**Duration:** {fmt_time(duration)}",
+        f"**Source:** {audio.name}",
+        "",
+        "---",
+        "",
+    ]
+    for seg in segments:
+        text = seg.text.strip()
+        if text:
+            lines.append(f"**[{fmt_time(seg.start)}]** {text}")
+            lines.append("")
+    lines += ["---", f"*Transcribed locally by GigaAM Multilingual ({model_name}, onnx-asr)*", ""]
+    md_file.write_text("\n".join(lines), encoding="utf-8")
+
+    rtf = duration / elapsed if elapsed > 0 else 0
+    print(f"{md_file} ({fmt_time(duration)} audio in {elapsed:.0f}s, {rtf:.1f}x realtime)")
+    return md_file
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        prog="sezish",
+        description="Offline meeting transcription: Russian, Uzbek, Kazakh, Kyrgyz, English (GigaAM Multilingual)",
+    )
+    parser.add_argument("files", nargs="+", type=Path, help="Audio files (.mp4/.m4a/.mp3/.wav)")
+    parser.add_argument("--large", action="store_true", help="Use 600M model (better Uzbek, needs more RAM)")
+    parser.add_argument("--output", type=Path, help="Output dir (default: next to source)")
+    args = parser.parse_args()
+
+    missing = [f for f in args.files if not f.is_file()]
+    if missing:
+        sys.exit(f"ERROR: file not found: {', '.join(map(str, missing))}")
+    if args.output:
+        args.output.mkdir(parents=True, exist_ok=True)
+
+    import onnx_asr
+
+    model_name = MODELS["large" if args.large else "base"]
+    print(f"Loading {model_name} (int8)...", file=sys.stderr)
+    # ponytail: CPU EP only — CoreML EP compiles a 2k-node graph, leaks and gets the process killed;
+    # int8-CTC on CPU is fast enough. Revisit if RTF on 8GB Air disappoints.
+    cpu = ["CPUExecutionProvider"]
+    model = onnx_asr.load_model(model_name, quantization="int8", providers=cpu).with_vad(
+        onnx_asr.load_vad("silero", providers=cpu)
+    )
+
+    for audio in args.files:
+        transcribe_file(model, model_name, audio, args.output)
+
+
+if __name__ == "__main__":
+    main()

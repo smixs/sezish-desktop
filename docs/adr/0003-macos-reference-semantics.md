@@ -1,0 +1,3 @@
+# Behavior constants come from the macOS app, not from OSS research
+
+The Swift sources in `app/Sources/` are the single source of truth for behavior: toggle cooldown 0.5 s (hold exempt), minimum dictation 4800 samples (0.3 s @16 kHz), history-before-insert, empty-text records kept, mode set by settings — no press-duration heuristics. The research doc (`docs/windows-port-research.md`) is normative only for WinAPI mechanics (hook type, SendInput batching, linking). Recorded because the research quotes different constants from OSS apps (250 ms debounce, 350 ms hold heuristics) and an agent reading both would blend them.

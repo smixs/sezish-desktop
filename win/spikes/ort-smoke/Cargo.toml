@@ -1,0 +1,11 @@
+[package]
+name = "spike-ort"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# ADR-0007: NO download-binaries. Load the operator-supplied onnxruntime.dll at
+# runtime (load-dynamic) instead of statically linking a prebuilt.
+[dependencies]
+ort = { version = "=2.0.0-rc.10", default-features = false, features = ["load-dynamic", "ndarray"] }
+ndarray = "0.16"
