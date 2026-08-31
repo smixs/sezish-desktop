@@ -2,8 +2,8 @@
 // from metal-fx (https://github.com/Jakubantalik/metal-fx, MIT (c) 2026 Jakub
 // Antalik), matching the site's metal.js chromatic-dark preset. The preset is
 // baked as constants: all palette alphas are 1, so the original's palette-alpha
-// path collapses to 1 and is not ported; blur is 0, so there is exactly one
-// effect tap per pixel.
+// path collapses to 1 and is not ported; blur is 1, so the reference's 5-tap
+// cross blur is always active and is ported as-is.
 
 #include <metal_stdlib>
 using namespace metal;
@@ -18,11 +18,11 @@ constant float3 kColor5 = float3(0.051, 0.051, 0.051); // #0d0d0d
 
 constant float kDirection = 80.0 * M_PI_F / 180.0;
 constant float kIntensity = 2.0;
-// Tuned by eye on the 156 px pill: fewer, thicker bands read as metal —
-// dense fast ripples read as liquid (user feedback 2026-07-25).
-constant float kScale = 0.22;
+constant float kScale = 1.6;
 constant float kDistortion = 0.3;
-constant float kFreq = 3.2;               // fewer sine bands = thicker highlights
+// freq = 3.0 + complexity * 8.0 with the reference complexity of 0.68.
+constant float kFreq = 8.44;
+constant float kBlur = 1.0;
 constant float kVignette = 0.26;
 constant float kVigOpacity = 0.6;
 constant float kShaderOpacity = 0.7;
@@ -55,11 +55,12 @@ static float snoise(float2 v) {
     return 130.0 * dot(m, g);
 }
 
-// complexity 0.3 → int(3 + 0.3 * 4) = 4 octaves, unrolled bound
-static float fbm4(float2 p) {
+// Reference nfbm: fbm(p, 3.0 + complexity * 4.0) with complexity 0.68 gives
+// int(5.72) = 5 octaves.
+static float fbm5(float2 p) {
     float val = 0.0;
     float amp = 0.5;
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < 5; i++) {
         val += amp * snoise(p);
         p *= 2.0;
         amp *= 0.5;
@@ -84,8 +85,8 @@ static float3 palette(float t) {
 static float2 warp(float2 p, float t) {
     const float str = kDistortion * 2.0;
     return float2(
-        fbm4(p + float2(t * 0.1, 0.0)),
-        fbm4(p + float2(0.0, t * 0.12) + 5.0)
+        fbm5(p + float2(t * 0.1, 0.0)),
+        fbm5(p + float2(0.0, t * 0.12) + 5.0)
     ) * str;
 }
 
@@ -117,7 +118,17 @@ static float3 computeEffect(float2 uv, float aspect, float t) {
     float2 uv = position / size;
     uv.y = 1.0 - uv.y; // gl_FragCoord parity with the WebGL original
 
-    float3 col = computeEffect(uv, size.x / size.y, time);
+    float aspect = size.x / size.y;
+
+    // 5-tap cross blur, center plus cardinal offsets, exactly as the reference
+    // main(). The preset ships blur = 1, so the radius is 1 * 0.02 in uv space.
+    const float r = kBlur * 0.02;
+    float3 col  = computeEffect(uv,                        aspect, time) * 0.4;
+    col        += computeEffect(uv + float2( r, 0.0),      aspect, time) * 0.15;
+    col        += computeEffect(uv + float2(-r, 0.0),      aspect, time) * 0.15;
+    col        += computeEffect(uv + float2(0.0,  r),      aspect, time) * 0.15;
+    col        += computeEffect(uv + float2(0.0, -r),      aspect, time) * 0.15;
+
     col = pow(col, float3(1.3));
 
     // Vignette — the 40 px scale is hard-coded in the canonical engine.

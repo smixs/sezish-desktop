@@ -2,7 +2,7 @@ import SwiftUI
 
 /// Liquid-metal ring around the recording pill — the site's record-button bezel
 /// brought into the app. The flow speed is strictly constant (voice animates the
-/// glyph, never the metal), capped at 24 fps, and does zero work while the
+/// glyph, never the metal), capped at 60 fps, and does zero work while the
 /// panel is hidden. The stroke's own color doubles as the graceful fallback if
 /// the shader library fails to load.
 struct MetalRimView: View {
@@ -14,9 +14,8 @@ struct MetalRimView: View {
     /// green rim). Time relative to the view's birth keeps t in single digits.
     @State private var born = Date()
 
-    // The site now ships speed 1.2; 1.35 is triple our old 0.45 and sits a touch
-    // past the reference so the ring reads as live metal at HUD size.
-    private static let shaderSpeed = 1.35
+    /// Exact reference speed: the site's preset ships 1.2.
+    private static let shaderSpeed = 1.2
     /// Static frame that reads well — the metal.js reduced-motion canon.
     private static let staticTime = 7.0
     // Hairline like the reference Upgrade button on metal.jakubantalik.com —
@@ -27,7 +26,9 @@ struct MetalRimView: View {
         if reduceMotion {
             ring(time: Self.staticTime)
         } else {
-            TimelineView(.animation(minimumInterval: 1.0 / 24, paused: !isActive)) { timeline in
+            // 60 fps, matching the reference's requestAnimationFrame loop. At
+            // 24 fps the fast metal strobes.
+            TimelineView(.animation(minimumInterval: 1.0 / 60, paused: !isActive)) { timeline in
                 ring(time: timeline.date.timeIntervalSince(born) * Self.shaderSpeed + Self.staticTime)
             }
         }
