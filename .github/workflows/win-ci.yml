@@ -35,6 +35,14 @@ jobs:
             echo "ADR-0007 forbids the ort download-binaries feature."
             exit 1
           fi
+      # tauri's build script validates bundle.resources paths at compile time;
+      # CI only needs the files to exist. The real DLLs are vendored by
+      # win-release (pinned Microsoft build), never by ort (ADR-0007).
+      - name: Stub ONNX Runtime DLL resources
+        shell: bash
+        run: |
+          printf 'placeholder for cargo check' > src-tauri/onnxruntime.dll
+          printf 'placeholder for cargo check' > src-tauri/onnxruntime_providers_shared.dll
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
@@ -62,6 +70,14 @@ jobs:
             echo "ADR-0007 forbids the ort download-binaries feature."
             exit 1
           fi
+      # tauri's build script validates bundle.resources paths at compile time;
+      # CI only needs the files to exist. The real DLLs are vendored by
+      # win-release (pinned Microsoft build), never by ort (ADR-0007).
+      - name: Stub ONNX Runtime DLL resources
+        shell: bash
+        run: |
+          printf 'placeholder for cargo check' > src-tauri/onnxruntime.dll
+          printf 'placeholder for cargo check' > src-tauri/onnxruntime_providers_shared.dll
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace

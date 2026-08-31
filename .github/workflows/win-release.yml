@@ -29,6 +29,18 @@ jobs:
         run: choco install llvm -y
       - name: Install Tauri CLI
         run: cargo install tauri-cli --version "^2" --locked
+      # ort 2.0.0-rc.10 + load-dynamic (ADR-0007): the runtime DLLs ship as
+      # tauri resources next to the exe. Vendor the pinned official Microsoft
+      # build; ort itself must never download binaries.
+      - name: Vendor ONNX Runtime DLLs
+        shell: pwsh
+        run: |
+          $ver = "1.22.0"
+          $zip = "onnxruntime-win-x64-$ver.zip"
+          Invoke-WebRequest -Uri "https://github.com/microsoft/onnxruntime/releases/download/v$ver/$zip" -OutFile $zip
+          Expand-Archive $zip -DestinationPath ort-dist
+          Copy-Item "ort-dist/onnxruntime-win-x64-$ver/lib/onnxruntime.dll" src-tauri/
+          Copy-Item "ort-dist/onnxruntime-win-x64-$ver/lib/onnxruntime_providers_shared.dll" src-tauri/
       - name: Build signed installer
         shell: pwsh
         env:
