@@ -55,7 +55,7 @@ body {
   );
   -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 1.6px), #000 calc(100% - 1.25px));
   mask: radial-gradient(farthest-side, transparent calc(100% - 1.6px), #000 calc(100% - 1.25px));
-  animation: rim-spin 2.2s linear infinite;
+  animation: rim-spin 0.73s linear infinite;
 }
 
 .disc {
