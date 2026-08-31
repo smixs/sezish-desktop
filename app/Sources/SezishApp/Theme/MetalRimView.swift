@@ -14,9 +14,9 @@ struct MetalRimView: View {
     /// green rim). Time relative to the view's birth keeps t in single digits.
     @State private var born = Date()
 
-    // Tuned by eye: 0.15 read as frozen, 0.22 as slow metal; 0.45 flows — a touch
-    // past the site's 0.4 so the ring clearly lives at HUD size.
-    private static let shaderSpeed = 0.45
+    // The site now ships speed 1.2; 1.35 is triple our old 0.45 and sits a touch
+    // past the reference so the ring reads as live metal at HUD size.
+    private static let shaderSpeed = 1.35
     /// Static frame that reads well — the metal.js reduced-motion canon.
     private static let staticTime = 7.0
     // Hairline like the reference Upgrade button on metal.jakubantalik.com —
