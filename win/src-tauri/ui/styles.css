@@ -380,6 +380,13 @@ h2 {
   color: var(--brand-red);
 }
 
+/* The same warning as a standalone paragraph: drop the browser's bottom margin
+   and match the message metrics of the card it sits in. */
+p.option-warning {
+  margin: 5px 0 0;
+  font-size: 11px;
+}
+
 .model-section {
   margin-top: 10px;
   padding-top: 10px;

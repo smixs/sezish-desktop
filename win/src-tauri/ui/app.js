@@ -28,6 +28,8 @@ const strings = {
     shortcutLabel: "Сочетание клавиш",
     recorderPrompt: "Нажмите клавишу…  (Esc — отмена)",
     recorderNeedsModifier: "Добавьте Ctrl, Alt, Shift или Win",
+    rightShiftWarning:
+      "Правый Shift дольше 8 секунд включает системную «Фильтрацию ввода» и обрывает диктовку. Выберите другую клавишу.",
     keyLeft: "Левый",
     keyRight: "Правый",
     paneUpdates: "Обновления",
@@ -64,6 +66,8 @@ const strings = {
     shortcutLabel: "Tugmalar birikmasi",
     recorderPrompt: "Tugmani bosing…  (Esc - bekor)",
     recorderNeedsModifier: "Ctrl, Alt, Shift yoki Win qoʼshing",
+    rightShiftWarning:
+      "Oʼng Shift 8 soniyadan uzoq bosib turilsa, tizim «Kirish filtri»ni yoqadi va diktovkani uzadi. Boshqa tugmani tanlang.",
     keyLeft: "Chap",
     keyRight: "Oʼng",
     paneUpdates: "Yangilanishlar",
@@ -157,6 +161,7 @@ function cacheElements() {
     "shortcut-label",
     "shortcut-recorder",
     "shortcut-value",
+    "shortcut-warning",
     "hotkey-error",
     "recognition-heading",
     "mode-cloud",
@@ -286,6 +291,14 @@ function renderControls() {
       currentStrings()
     );
   }
+  const rightShiftPicked =
+    Boolean(settings.shortcut) &&
+    settings.shortcut.kind === "modifier" &&
+    settings.shortcut.vk === MODIFIER_CODES.ShiftRight;
+  elements["shortcut-warning"].textContent = rightShiftPicked
+    ? currentStrings().rightShiftWarning
+    : "";
+  elements["shortcut-warning"].hidden = !rightShiftPicked;
   elements["mode-cloud"].setAttribute(
     "aria-checked",
     String(settings.transcription_mode === "cloud")
@@ -521,7 +534,13 @@ async function setHotkeyMode() {
 
 // --- Hotkey recorder --------------------------------------------------------
 
-const recorder = { active: false, sawSecondModifier: false, committed: false };
+const recorder = {
+  active: false,
+  sawSecondModifier: false,
+  committed: false,
+  pendingModifier: null,
+  altGr: false
+};
 
 const MODIFIER_CODES = {
   ControlLeft: 0xa2,
@@ -632,6 +651,8 @@ async function startRecording() {
   recorder.active = true;
   recorder.sawSecondModifier = false;
   recorder.committed = false;
+  recorder.pendingModifier = null;
+  recorder.altGr = false;
   setError("hotkey", null);
   elements["shortcut-recorder"].classList.add("is-recording");
   setRecorderText(currentStrings().recorderPrompt);
@@ -686,7 +707,13 @@ function onRecorderKeydown(event) {
       return;
     }
     if (recorder.pendingModifier && recorder.pendingModifier !== code) {
-      recorder.sawSecondModifier = true;
+      if (recorder.pendingModifier === "ControlLeft" && code === "AltRight") {
+        // AltGr: Windows fakes a left Ctrl right before the right Alt. One
+        // physical key, so keep recording it as a bare right Alt.
+        recorder.altGr = true;
+      } else {
+        recorder.sawSecondModifier = true;
+      }
     }
     recorder.pendingModifier = code;
     return;
@@ -711,6 +738,15 @@ function onRecorderKeyup(event) {
   event.stopPropagation();
   const code = event.code;
   if (!Object.prototype.hasOwnProperty.call(MODIFIER_CODES, code)) {
+    return;
+  }
+  if (recorder.altGr && !recorder.sawSecondModifier) {
+    // The release comes as a pair too, and the faked Ctrl still reads as held on
+    // the other event, so stillHeld would never clear: the first half of the
+    // pair to come up ends the one physical key.
+    if (!recorder.committed) {
+      commitShortcut({ kind: "modifier", vk: MODIFIER_CODES.AltRight });
+    }
     return;
   }
   const stillHeld = event.ctrlKey || event.altKey || event.shiftKey || event.metaKey;
