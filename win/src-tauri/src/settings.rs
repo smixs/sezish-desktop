@@ -176,10 +176,12 @@ mod tests {
     fn settings_roundtrip_a_custom_key_combo_shortcut() {
         let directory = TempDir::new().expect("temporary directory should be created");
         let path = directory.path().join("settings.json");
-        let mut settings = Settings::default();
-        settings.shortcut = Shortcut::Key {
-            vk: 0x51,
-            mods: Modifiers::ALT,
+        let settings = Settings {
+            shortcut: Shortcut::Key {
+                vk: 0x51,
+                mods: Modifiers::ALT,
+            },
+            ..Default::default()
         };
         settings.save(&path).expect("settings should save");
 
