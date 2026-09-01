@@ -98,12 +98,13 @@ struct AudioChunkerTests {
         #expect(gaps[1].contains(chunks[1].upperBound))
     }
 
-    /// The shipped numbers: 180 s of audio per chunk, well under the 200 s the ONNX
-    /// attention mask is baked for.
-    @Test func theDefaultLimitStaysUnderTheModelCeiling() {
-        #expect(AudioChunker.defaultLimit == 180 * 16_000)
+    /// The shipped numbers: 30 s of audio per chunk, the length GigaAM still transcribes well,
+    /// and far under the 200 s the ONNX attention mask is baked for.
+    @Test func theDefaultLimitKeepsChunksShortEnoughForTheModel() {
+        #expect(AudioChunker.defaultLimit == 30 * 16_000)
+        // 200 s of unbroken speech: no quiet spot to find, so every cut lands on the limit.
         let chunks = AudioChunker.split(speech(16_000 * 200))
-        #expect(chunks.count == 2)
-        #expect(chunks.allSatisfy { $0.count <= 200 * 16_000 })
+        #expect(chunks.count == 7)
+        #expect(chunks.allSatisfy { $0.count <= 30 * 16_000 })
     }
 }

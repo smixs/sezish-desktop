@@ -7,9 +7,16 @@ import Foundation
 /// "Attempting to broadcast an axis by a dimension other than 1". So anything longer is cut,
 /// preferably where nobody is speaking — a boundary through the middle of a word costs both
 /// chunks their last and first token.
+///
+/// That mask is only the hard stop. The chunk actually shipped is far shorter, because the
+/// transcription quality falls apart long before the ceiling: see `defaultLimit`.
 enum AudioChunker {
-    /// 180 s at 16 kHz, 20 s short of the hard ceiling.
-    static let defaultLimit = 180 * 16_000
+    /// 30 s at 16 kHz. This is the quality ceiling of GigaAM, not a technical one: the model is
+    /// trained on short utterances, and past roughly half a minute the CTC output degrades into
+    /// mush with letters dropped. Confirmed by an A/B over a real 170 s recording through the same
+    /// ONNX pipeline: one 170 s pass came back garbled, 30 s and 25 s chunks came back clean.
+    /// As a side effect it also sits far below the hard 200 s ceiling of the attention mask.
+    static let defaultLimit = 30 * 16_000
 
     /// How far back from the ideal boundary a quiet spot is worth looking for.
     static let searchWindow = 10 * 16_000
