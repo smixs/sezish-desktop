@@ -8,5 +8,7 @@
 mod interpreter;
 mod shortcut;
 
-pub use interpreter::{Command, HotkeyMode, HotkeyModeInterpreter};
+pub use interpreter::{
+    hold_rearm_allowed, Command, HotkeyMode, HotkeyModeInterpreter, SWALLOWED_PRESS_HOLD_WINDOW,
+};
 pub use shortcut::{normalize_modifier_vk, vk, Edge, HookDecision, KeyEvent, Modifiers, Shortcut};

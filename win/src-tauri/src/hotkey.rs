@@ -2,13 +2,16 @@
 mod windows_adapter {
     use sez_core::Clock;
     use sez_hotkey::{
-        Command, Edge, HotkeyMode, HotkeyModeInterpreter, KeyEvent, Modifiers, Shortcut,
+        hold_rearm_allowed, Command, Edge, HotkeyMode, HotkeyModeInterpreter, KeyEvent, Modifiers,
+        Shortcut, SWALLOWED_PRESS_HOLD_WINDOW,
     };
+    use sez_inject::SELF_INJECTION_TAG;
     use std::cell::RefCell;
     use std::io;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{mpsc, Arc};
     use std::thread::{self, JoinHandle};
+    use std::time::Duration;
     use windows::Win32::Foundation::{HINSTANCE, LPARAM, LRESULT, WPARAM};
     use windows::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows::Win32::System::Threading::GetCurrentThreadId;
@@ -36,11 +39,15 @@ mod windows_adapter {
 
     struct HookContext {
         interpreter: HotkeyModeInterpreter,
+        clock: Arc<dyn Clock>,
         shortcut: Shortcut,
         combo_engaged: bool,
         suspended: bool,
         recording: Arc<AtomicBool>,
         swallowing_escape: bool,
+        /// When the last swallowed press edge arrived. A swallowed key never
+        /// reaches the async key state, so this is the only trace it leaves.
+        last_swallowed_press_at: Option<Duration>,
         on_command: Box<dyn FnMut(Command)>,
         on_cancel: Box<dyn FnMut()>,
     }
@@ -76,16 +83,19 @@ mod windows_adapter {
                     }
 
                     let recording_query = Arc::clone(&recording);
+                    let hook_clock = Arc::clone(&clock);
                     HOOK_CONTEXT.with(|slot| {
                         *slot.borrow_mut() = Some(HookContext {
                             interpreter: HotkeyModeInterpreter::new(mode, clock, move || {
                                 recording_query.load(Ordering::Acquire)
                             }),
+                            clock: hook_clock,
                             shortcut,
                             combo_engaged: false,
                             suspended: false,
                             recording,
                             swallowing_escape: false,
+                            last_swallowed_press_at: None,
                             on_command: Box::new(on_command),
                             on_cancel: Box::new(on_cancel),
                         });
@@ -138,12 +148,16 @@ mod windows_adapter {
                                                 let _ = acknowledgement.send(());
                                             }
                                             Control::SetShortcut(shortcut, acknowledgement) => {
+                                                crate::obs::log(&format!(
+                                                    "hotkey shortcut={shortcut:?}"
+                                                ));
                                                 HOOK_CONTEXT.with(|slot| {
                                                     if let Some(context) =
                                                         slot.borrow_mut().as_mut()
                                                     {
                                                         context.shortcut = shortcut;
                                                         context.combo_engaged = false;
+                                                        context.last_swallowed_press_at = None;
                                                         context.interpreter.reset();
                                                     }
                                                 });
@@ -309,11 +323,27 @@ mod windows_adapter {
     fn prepare_health_rearm() -> bool {
         HOOK_CONTEXT.with(|slot| {
             if let Some(context) = slot.borrow_mut().as_mut() {
-                let hotkey_down = shortcut_currently_held(&context.shortcut);
-                if context.interpreter.mode == HotkeyMode::Hold
-                    && context.recording.load(Ordering::Acquire)
-                    && hotkey_down
-                {
+                // A swallowed shortcut is invisible to GetAsyncKeyState (the hook eats
+                // the event before the system sees it), so its hold is judged by how
+                // fresh the last swallowed press is instead.
+                let (physically_held, press_age) = if context.shortcut.should_swallow() {
+                    let now = context.clock.now();
+                    (
+                        false,
+                        context
+                            .last_swallowed_press_at
+                            .map(|at| now.saturating_sub(at)),
+                    )
+                } else {
+                    (shortcut_currently_held(&context.shortcut), None)
+                };
+                if !hold_rearm_allowed(
+                    context.interpreter.mode,
+                    context.recording.load(Ordering::Acquire),
+                    physically_held,
+                    press_age,
+                    SWALLOWED_PRESS_HOLD_WINDOW,
+                ) {
                     return false;
                 }
                 let command = context.interpreter.key_released();
@@ -329,6 +359,13 @@ mod windows_adapter {
     unsafe extern "system" fn hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
         if code >= 0 {
             let event = unsafe { &*(lparam.0 as *const KBDLLHOOKSTRUCT) };
+            // Our own text insertion synthesises thousands of events per dictation.
+            // Matching each one would eat the LowLevelHooksTimeout budget the OS
+            // gives this callback, and an injected VK_RETURN would otherwise read
+            // as an Enter shortcut, so drop them before any other work.
+            if event.dwExtraInfo == SELF_INJECTION_TAG {
+                return unsafe { CallNextHookEx(None, code, wparam, lparam) };
+            }
             let message = wparam.0 as u32;
             let key_down = message == WM_KEYDOWN || message == WM_SYSKEYDOWN;
             let key_up = message == WM_KEYUP || message == WM_SYSKEYUP;
@@ -381,6 +418,12 @@ mod windows_adapter {
                             "hook edge={edge:?} vk=0x{:X} swallow={}",
                             key_event.vk, decision.swallow
                         ));
+                        if edge == Edge::Press && decision.swallow {
+                            // Auto-repeat refreshes this while the key stays down;
+                            // the health rearm reads it to spot a live hold.
+                            let now = context.clock.now();
+                            context.last_swallowed_press_at = Some(now);
+                        }
                         let command = match edge {
                             Edge::Press => context.interpreter.key_pressed(),
                             Edge::Release => context.interpreter.key_released(),

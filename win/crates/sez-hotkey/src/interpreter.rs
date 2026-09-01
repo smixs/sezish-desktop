@@ -101,9 +101,39 @@ impl HotkeyModeInterpreter {
     }
 }
 
+/// How stale the last swallowed press may be before the key counts as released.
+/// Windows auto-repeat re-delivers a held key every ~30 ms once its repeat delay
+/// (at most 1 s) has passed, and every repeat produces a fresh `Edge::Press`, so
+/// two seconds of silence means the key really is up.
+pub const SWALLOWED_PRESS_HOLD_WINDOW: Duration = Duration::from_secs(2);
+
+/// Whether the keyboard hook may be torn down and reinstalled right now. The
+/// rearm emits a synthetic release, so a hold-mode take in progress would be cut
+/// off mid-word; skip the rearm while the hotkey is still down.
+///
+/// `physically_held` is what `GetAsyncKeyState` reports and only works for events
+/// the hook lets through. A swallowed `.key` press never reaches the async key
+/// state, so for those the caller passes `press_age`: the time since the last
+/// swallowed press edge.
+pub fn hold_rearm_allowed(
+    mode: HotkeyMode,
+    recording: bool,
+    physically_held: bool,
+    press_age: Option<Duration>,
+    hold_window: Duration,
+) -> bool {
+    if mode != HotkeyMode::Hold || !recording {
+        return true;
+    }
+    let held = physically_held || press_age.is_some_and(|age| age <= hold_window);
+    !held
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{Command, HotkeyMode, HotkeyModeInterpreter};
+    use super::{
+        hold_rearm_allowed, Command, HotkeyMode, HotkeyModeInterpreter, SWALLOWED_PRESS_HOLD_WINDOW,
+    };
     use sez_core::test_util::MockClock;
     use std::cell::Cell;
     use std::rc::Rc;
@@ -190,5 +220,66 @@ mod tests {
         interpreter.reset();
         is_recording.set(false);
         assert_eq!(interpreter.key_pressed(), Command::Start);
+    }
+
+    #[test]
+    fn swallowed_key_held_through_auto_repeat_blocks_the_rearm() {
+        // F9 held: auto-repeat refreshed the press a moment ago, no async key state.
+        assert!(!hold_rearm_allowed(
+            HotkeyMode::Hold,
+            true,
+            false,
+            Some(Duration::from_millis(120)),
+            SWALLOWED_PRESS_HOLD_WINDOW,
+        ));
+    }
+
+    #[test]
+    fn swallowed_key_released_with_a_lost_release_allows_the_rearm() {
+        // The key came up but its release edge never arrived: auto-repeat stopped,
+        // so the rearm may run and its synthetic release ends the stuck take.
+        assert!(hold_rearm_allowed(
+            HotkeyMode::Hold,
+            true,
+            false,
+            Some(Duration::from_secs(5)),
+            SWALLOWED_PRESS_HOLD_WINDOW,
+        ));
+    }
+
+    #[test]
+    fn modifier_only_still_decides_by_the_async_key_state() {
+        assert!(!hold_rearm_allowed(
+            HotkeyMode::Hold,
+            true,
+            true,
+            None,
+            SWALLOWED_PRESS_HOLD_WINDOW,
+        ));
+        assert!(hold_rearm_allowed(
+            HotkeyMode::Hold,
+            true,
+            false,
+            None,
+            SWALLOWED_PRESS_HOLD_WINDOW,
+        ));
+    }
+
+    #[test]
+    fn idle_or_toggle_never_blocks_the_rearm() {
+        assert!(hold_rearm_allowed(
+            HotkeyMode::Hold,
+            false,
+            true,
+            Some(Duration::ZERO),
+            SWALLOWED_PRESS_HOLD_WINDOW,
+        ));
+        assert!(hold_rearm_allowed(
+            HotkeyMode::Toggle,
+            true,
+            true,
+            Some(Duration::ZERO),
+            SWALLOWED_PRESS_HOLD_WINDOW,
+        ));
     }
 }
