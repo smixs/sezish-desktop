@@ -1,5 +1,6 @@
 //! Local transcription support.
 
+pub mod chunker;
 mod ctc;
 mod downloader;
 #[cfg(feature = "local-inference")]

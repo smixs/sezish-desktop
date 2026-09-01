@@ -1,4 +1,4 @@
-use crate::{CtcDecoder, Vocab, VocabError};
+use crate::{chunker, CtcDecoder, Vocab, VocabError};
 use ort::{session::Session, value::Tensor};
 use sez_core::{SezError, Transcriber};
 use std::{
@@ -93,8 +93,34 @@ impl LocalTranscriber {
             .iter()
             .map(|&sample| f32::from(sample) / 32_768.0)
             .collect::<Vec<_>>();
-        let sample_count = samples.len();
-        let waveforms = Tensor::from_array(([1_usize, sample_count], waveform))?;
+
+        let mut sessions = self
+            .inner
+            .sessions
+            .lock()
+            .map_err(|_| LocalTranscriberError::LockPoisoned)?;
+
+        // One buffer past the length the model was trained on comes back as mush, so long
+        // audio is cut at silences and run piece by piece. A failing piece fails the take:
+        // half a transcript is worse than an error the caller can retry.
+        let mut parts = Vec::new();
+        for chunk in chunker::split(&waveform) {
+            let text = Self::run(&mut sessions, &self.inner.vocab, &waveform[chunk])?;
+            if !text.is_empty() {
+                parts.push(text);
+            }
+        }
+        Ok(parts.join(" "))
+    }
+
+    /// One pass through the ONNX pipeline. The caller guarantees the buffer fits the model.
+    fn run(
+        sessions: &mut Sessions,
+        vocab: &Vocab,
+        waveform: &[f32],
+    ) -> Result<String, LocalTranscriberError> {
+        let sample_count = waveform.len();
+        let waveforms = Tensor::from_array(([1_usize, sample_count], waveform.to_vec()))?;
         let waveform_lengths = Tensor::from_array((
             [1_usize],
             vec![i64::try_from(sample_count).map_err(|_| {
@@ -102,15 +128,10 @@ impl LocalTranscriber {
             })?],
         ))?;
 
-        let mut sessions = self
-            .inner
-            .sessions
-            .lock()
-            .map_err(|_| LocalTranscriberError::LockPoisoned)?;
         let Sessions {
             preprocessor,
             acoustic_model,
-        } = &mut *sessions;
+        } = sessions;
         let preprocessed = preprocessor.run(ort::inputs![
             "waveforms" => waveforms,
             "waveforms_lens" => waveform_lengths,
@@ -155,11 +176,7 @@ impl LocalTranscriber {
             .chunks_exact(vocab_size)
             .map(<[f32]>::to_vec)
             .collect::<Vec<_>>();
-        Ok(CtcDecoder::decode(
-            &frames,
-            &self.inner.vocab.tokens,
-            self.inner.vocab.blank_id,
-        ))
+        Ok(CtcDecoder::decode(&frames, &vocab.tokens, vocab.blank_id))
     }
 }
 
