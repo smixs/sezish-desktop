@@ -32,13 +32,27 @@ public enum SezishAsrError: Error {
 ///
 /// Audio longer than `AudioChunker.defaultLimit` is cut and run piece by piece: the export's
 /// attention mask is fixed at 200 s and one tensor with more than that in it throws.
-public actor GigaAmTranscriber: Transcriber {
+///
+/// Dictation drives it as a `StreamingTranscriber`: every chunk is transcribed while the user
+/// is still speaking, so releasing the key costs the tail alone instead of the whole take.
+public actor GigaAmTranscriber: StreamingTranscriber {
     private let modelURL: URL
     private let vocab: Vocab
 
     private var env: ORTEnv?
     private var preprocessor: ORTSession?
     private var acousticModel: ORTSession?
+
+    /// Filled from the realtime audio thread by `feed`, emptied on the actor.
+    private nonisolated let inbox = SampleBuffer()
+    /// Samples taken off the inbox that are not yet a whole chunk.
+    private var cutter = StreamCutter()
+    private var streamParts: [String] = []
+    /// The first chunk that failed. It fails the whole take: half a transcript silently
+    /// missing its middle is worse than none, and the coordinator keeps the audio and the
+    /// reason so the user can run it again.
+    private var streamFailure: Error?
+    private var streaming = false
 
     /// The local engine failed silently until this existed: `.notice` and `.error` survive on
     /// disk, so `log show --predicate 'subsystem == "com.smixs.sezish"'` can say what happened.
@@ -81,6 +95,77 @@ public actor GigaAmTranscriber: Transcriber {
             if !text.isEmpty { parts.append(text) }
         }
         return parts.joined(separator: " ")
+    }
+
+    // MARK: - StreamingTranscriber
+
+    /// Clean slate plus the ONNX session, so the first chunk of the take does not pay for it.
+    ///
+    /// The inbox is deliberately left alone: `begin()` starts the mic and this in parallel, so
+    /// the first tap can land before the take is marked open, and those samples are the
+    /// beginning of the speech. Whatever the previous take left was taken by its own
+    /// `finishStream` or dropped by its `cancelStream`.
+    public func startStream() async {
+        resetTake()
+        streaming = true
+        try? await warmup()
+    }
+
+    /// Realtime audio thread. Appending under the lock is all that happens here; the
+    /// transcription is picked up on the actor by the task this hands off to.
+    public nonisolated func feed(_ samples16k: [Float]) {
+        guard !samples16k.isEmpty else { return }
+        inbox.append(samples16k)
+        Task { await self.transcribeReadyChunks() }
+    }
+
+    public func finishStream() async throws -> String {
+        // Drains queued by `feed` may still be waiting for the actor. Everything they would
+        // have taken is taken here, and they find the take closed and do nothing.
+        streaming = false
+        cutter.append(inbox.takeAll())
+        let parts = streamParts
+        let failure = streamFailure
+        let rest = cutter.takeRest()
+        resetTake()
+
+        if let failure { throw failure }
+        // Normally one chunk at most; more when the drains never got the actor, and `transcribe`
+        // cuts that the same way this would have.
+        let tail = try await transcribe(rest)
+        return (parts + [tail]).filter { !$0.isEmpty }.joined(separator: " ")
+    }
+
+    public func cancelStream() async {
+        streaming = false
+        inbox.reset()
+        resetTake()
+    }
+
+    /// Transcribes every chunk the stream has completed so far. No `await` inside, so the
+    /// actor runs it to the end in one go: however the queued drains are scheduled, each one
+    /// takes the oldest samples and appends its text before the next one starts, and the
+    /// parts stay in the order they were spoken.
+    private func transcribeReadyChunks() {
+        guard streaming, streamFailure == nil else { return }
+        cutter.append(inbox.takeAll())
+        while let chunk = cutter.nextChunk() {
+            do {
+                let text = try run(chunk)
+                if !text.isEmpty { streamParts.append(text) }
+            } catch {
+                logger.error(
+                    "stream chunk failed: \(error.localizedDescription, privacy: .public)")
+                streamFailure = error
+                return
+            }
+        }
+    }
+
+    private func resetTake() {
+        cutter = StreamCutter()
+        streamParts = []
+        streamFailure = nil
     }
 
     /// One pass through the ONNX pipeline. The caller guarantees the buffer fits the model.

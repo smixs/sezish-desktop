@@ -47,6 +47,33 @@ import Testing
         #expect(text.count > 1_000) // a whole take, not the first chunk alone
     }
 
+    /// The point of streaming: the same recording fed in at the mic's cadence has to come back
+    /// as the text the batch pass produces, with the wait paid while it was still being spoken.
+    @Test func theStreamingPathMatchesTheBatchPass() async throws {
+        guard let samples = try samples(),
+              let model = ProcessInfo.processInfo.environment["SEZISH_LOCAL_MODEL"],
+              FileManager.default.fileExists(atPath: model) else { return }
+        let vocab = try ProcessInfo.processInfo.environment["SEZISH_LOCAL_VOCAB"]
+            .map { try Vocab(contentsOf: URL(fileURLWithPath: $0)) } ?? Vocab.bundled()
+        let transcriber = GigaAmTranscriber(modelURL: URL(fileURLWithPath: model), vocab: vocab)
+
+        await transcriber.startStream()
+        for start in stride(from: 0, to: samples.count, by: 1_600) { // 100 ms per feed
+            transcriber.feed(Array(samples[start..<min(start + 1_600, samples.count)]))
+            await Task.yield() // let the actor drain what is ready, as it would live
+        }
+        let clock = ContinuousClock()
+        let released = clock.now
+        let streamed = try await transcriber.finishStream()
+        let tail = clock.now - released
+        let batch = try await transcriber.transcribe(samples)
+
+        print("[LongAudio] streamed: \(samples.count / 16_000) s, tail took \(tail), "
+            + "\(streamed.count) chars\n\(streamed.prefix(200))")
+        #expect(!streamed.isEmpty)
+        #expect(streamed == batch)
+    }
+
     /// The other half of the bug: the same audio poured into the Live socket gets the session
     /// killed with «Resource has been exhausted». Over the batch endpoint it comes back whole.
     @Test func theBatchRouteTranscribesTheSameRecording() async throws {

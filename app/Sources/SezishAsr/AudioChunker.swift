@@ -34,21 +34,31 @@ enum AudioChunker {
         _ samples: [Float], limit: Int = defaultLimit, searchWindow: Int = searchWindow
     ) -> [Range<Int>] {
         guard !samples.isEmpty else { return [] }
-        precondition(limit > 0, "limit must be positive")
 
         var ranges: [Range<Int>] = []
         var start = 0
-        while samples.count - start > limit {
-            let hard = start + limit
-            // The quiet spot is searched for behind the ideal boundary only: moving it forward
-            // would push the chunk past the limit the whole exercise is about.
-            let earliest = max(start + 1, hard - searchWindow)
-            let cut = quietestCut(samples, from: earliest, to: hard) ?? hard
+        while let cut = nextCut(samples, from: start, limit: limit, searchWindow: searchWindow) {
             ranges.append(start..<cut)
             start = cut
         }
         ranges.append(start..<samples.count)
         return ranges
+    }
+
+    /// Where the chunk starting at `start` ends, or nil when what is left already fits in
+    /// `limit`. Only samples before the boundary decide it, so a recording still being spoken
+    /// gets the same answer here as the finished one gets from `split`.
+    static func nextCut(
+        _ samples: [Float], from start: Int = 0, limit: Int = defaultLimit,
+        searchWindow: Int = searchWindow
+    ) -> Int? {
+        precondition(limit > 0, "limit must be positive")
+        guard samples.count - start > limit else { return nil }
+        let hard = start + limit
+        // The quiet spot is searched for behind the ideal boundary only: moving it forward
+        // would push the chunk past the limit the whole exercise is about.
+        let earliest = max(start + 1, hard - searchWindow)
+        return quietestCut(samples, from: earliest, to: hard) ?? hard
     }
 
     /// Middle of the quietest probe window in `from..<to`, or nil when the whole stretch is
@@ -75,5 +85,41 @@ enum AudioChunker {
         var sum: Float = 0
         for index in range { sum += samples[index] * samples[index] }
         return (sum / Float(range.count)).squareRoot()
+    }
+}
+
+/// The streaming half of `AudioChunker`: samples arrive a little at a time and a chunk leaves
+/// as soon as its end is certain, which is the moment more than `limit` is buffered. Because
+/// the cut reads nothing past itself, what comes out here is exactly what `AudioChunker.split`
+/// produces over the same recording once it is finished.
+struct StreamCutter {
+    private var pending: [Float] = []
+    private let limit: Int
+    private let searchWindow: Int
+
+    init(
+        limit: Int = AudioChunker.defaultLimit, searchWindow: Int = AudioChunker.searchWindow
+    ) {
+        self.limit = limit
+        self.searchWindow = searchWindow
+    }
+
+    mutating func append(_ samples: [Float]) { pending.append(contentsOf: samples) }
+
+    /// The next chunk whose boundary is already decided, or nil while everything buffered
+    /// still fits one chunk and could yet grow into it.
+    mutating func nextChunk() -> [Float]? {
+        guard let cut = AudioChunker.nextCut(
+            pending, limit: limit, searchWindow: searchWindow) else { return nil }
+        let chunk = Array(pending[0..<cut])
+        pending.removeFirst(cut)
+        return chunk
+    }
+
+    /// Everything left over once the recording is over.
+    mutating func takeRest() -> [Float] {
+        let rest = pending
+        pending = []
+        return rest
     }
 }
