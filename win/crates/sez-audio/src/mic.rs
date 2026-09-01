@@ -12,8 +12,11 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle, Thread};
 use std::time::Duration;
 
-/// Tentative Windows-port idle timeout; not derived from the macOS reference.
-pub const DEFAULT_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
+/// How long the warm capture stream survives between dictations. Ten minutes
+/// covers the pauses inside a working session: opening a cold WASAPI stream costs
+/// about two seconds on real hardware, and no audio exists until it is open, so
+/// the start of that dictation is simply lost.
+pub const DEFAULT_IDLE_TIMEOUT: Duration = Duration::from_secs(600);
 
 const RING_CAPACITY: usize = 65_536;
 
