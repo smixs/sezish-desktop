@@ -1,5 +1,7 @@
 use crate::downmix::push_interleaved_converted;
-use crate::{f32_to_i16, IdleClosePolicy, MonoResampler, RingConsumer, SpscRingBuffer};
+use crate::{
+    f32_to_i16, IdleClosePolicy, MonoResampler, RingConsumer, SpscRingBuffer, StreamResampler,
+};
 use async_trait::async_trait;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, Sample, SampleFormat, SizedSample};
@@ -14,6 +16,13 @@ use std::time::Duration;
 pub const DEFAULT_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 
 const RING_CAPACITY: usize = 65_536;
+
+/// Sink for the recording as it is captured, 16 kHz mono PCM16, called while the user is still
+/// speaking.
+///
+/// It runs on the thread that drains the capture ring, so it must return immediately: anything
+/// slow here stops the ring from being emptied and the capture starts dropping samples.
+pub type CaptureTap = Arc<dyn Fn(&[i16]) + Send + Sync>;
 
 enum WorkerCommand {
     Start(Sender<()>),
@@ -94,6 +103,7 @@ pub struct CpalMic {
     idle_policy: IdleClosePolicy,
     warm_capture: Option<WarmCapture>,
     stream_error: Arc<Mutex<Option<SezError>>>,
+    tap: Option<CaptureTap>,
 }
 
 impl CpalMic {
@@ -109,7 +119,15 @@ impl CpalMic {
             idle_policy: IdleClosePolicy::new(idle_timeout),
             warm_capture: None,
             stream_error: Arc::new(Mutex::new(None)),
+            tap: None,
         }
+    }
+
+    /// Publishes the recording as it is captured, so a transcriber can work on the beginning of
+    /// a dictation while its end is still being spoken. Set before the first [`Mic::start`]:
+    /// the capture thread that calls the tap is opened there and keeps the one it was given.
+    pub fn set_tap(&mut self, tap: CaptureTap) {
+        self.tap = Some(tap);
     }
 
     /// Feeds the same device-error path used by CPAL's stream error callback.
@@ -154,9 +172,10 @@ impl CpalMic {
         let recording = Arc::new(AtomicBool::new(false));
         let callbacks_in_flight = Arc::new(AtomicUsize::new(0));
 
+        let tap = self.tap.clone();
         let worker = thread::Builder::new()
             .name("sez-audio-worker".to_owned())
-            .spawn(move || worker_loop(consumer, sample_rate, command_rx))
+            .spawn(move || worker_loop(consumer, sample_rate, command_rx, tap))
             .map_err(|error| SezError::Other(format!("failed to start audio worker: {error}")))?;
         let worker_thread = worker.thread().clone();
 
@@ -264,24 +283,46 @@ impl Mic for CpalMic {
     }
 }
 
-fn worker_loop(mut consumer: RingConsumer, sample_rate: u32, commands: Receiver<WorkerCommand>) {
+fn worker_loop(
+    mut consumer: RingConsumer,
+    sample_rate: u32,
+    commands: Receiver<WorkerCommand>,
+    tap: Option<CaptureTap>,
+) {
     let mut captured = Vec::new();
     let mut resampler = MonoResampler::new(sample_rate);
+    // How much of `captured` the tap has already seen, and the resampler rendering it while the
+    // recording goes on. The resampler is absent between dictations and after a failure.
+    let mut published = 0;
+    let mut stream = None;
 
     loop {
         while let Some(sample) = consumer.pop() {
             captured.push(sample);
         }
+        publish(tap.as_ref(), &mut stream, &captured[published..]);
+        published = captured.len();
 
         match commands.try_recv() {
             Ok(WorkerCommand::Start(ack)) => {
                 captured.clear();
+                published = 0;
                 let _ = ack.send(());
+                // Built after the acknowledgement: planning the transform takes a moment and
+                // the hotkey is not made to wait for it.
+                stream = tap
+                    .as_ref()
+                    .and_then(|_| StreamResampler::new(sample_rate).ok());
             }
             Ok(WorkerCommand::Stop(result)) => {
                 while let Some(sample) = consumer.pop() {
                     captured.push(sample);
                 }
+                // The tail is published before the caller gets its answer: whoever transcribes
+                // the stream must hold the whole take by the time it is asked for the text.
+                publish(tap.as_ref(), &mut stream, &captured[published..]);
+                flush(tap.as_ref(), stream.take());
+                published = 0;
                 let finalized = resampler
                     .as_mut()
                     .map_err(|error| SezError::Other(error.to_string()))
@@ -298,6 +339,39 @@ fn worker_loop(mut consumer: RingConsumer, sample_rate: u32, commands: Receiver<
             Err(mpsc::TryRecvError::Empty) => thread::park(),
         }
     }
+}
+
+/// Publishes what is ready of `samples`. A resampler that failed is dropped: the rest of the
+/// take stays unpublished, and the transcriber falls back to the whole recording because the
+/// stream no longer covers it.
+fn publish(tap: Option<&CaptureTap>, stream: &mut Option<StreamResampler>, samples: &[f32]) {
+    let Some(tap) = tap else {
+        return;
+    };
+    let Some(resampler) = stream.as_mut() else {
+        return;
+    };
+    match resampler.push(samples) {
+        Ok(ready) => send(tap, &ready),
+        Err(_) => *stream = None,
+    }
+}
+
+/// Publishes the last, partial block once the recording is over.
+fn flush(tap: Option<&CaptureTap>, stream: Option<StreamResampler>) {
+    let (Some(tap), Some(mut resampler)) = (tap, stream) else {
+        return;
+    };
+    if let Ok(ready) = resampler.flush() {
+        send(tap, &ready);
+    }
+}
+
+fn send(tap: &CaptureTap, samples: &[f32]) {
+    if samples.is_empty() {
+        return;
+    }
+    tap(&samples.iter().copied().map(f32_to_i16).collect::<Vec<_>>());
 }
 
 #[allow(clippy::too_many_arguments)]

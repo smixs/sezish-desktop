@@ -1,5 +1,6 @@
 use sez_audio::{
-    f32_to_i16, push_interleaved_f32, MonoResampler, SpscRingBuffer, TARGET_SAMPLE_RATE,
+    f32_to_i16, push_interleaved_f32, MonoResampler, SpscRingBuffer, StreamResampler,
+    TARGET_SAMPLE_RATE,
 };
 use std::f32::consts::TAU;
 
@@ -77,4 +78,63 @@ fn f32_conversion_clamps_extremes_scales_finite_values_and_silences_nan() {
     assert_eq!(f32_to_i16(-1.5), i16::MIN);
     assert_eq!(f32_to_i16(f32::NEG_INFINITY), i16::MIN);
     assert_eq!(f32_to_i16(f32::NAN), 0);
+}
+
+/// Transcribing during the recording only works if what the tap publishes is the recording:
+/// the blocks the stream produces have to be the clip the batch path produces, whatever size
+/// the capture callback happens to deliver.
+#[test]
+fn streamed_resampling_renders_the_same_clip_as_the_batch_one() {
+    const INPUT_RATE: u32 = 48_000;
+    const FREQUENCY: f32 = 440.0;
+    const INPUT_FRAMES: usize = 50_000;
+    /// The stream stops one filter delay short of the batch, which is where the clip would
+    /// need samples the microphone never captured.
+    const TAIL_ALLOWANCE: usize = 400;
+
+    let mono = (0..INPUT_FRAMES)
+        .map(|frame| (TAU * FREQUENCY * frame as f32 / INPUT_RATE as f32).sin() * 0.7)
+        .collect::<Vec<_>>();
+    let batch = MonoResampler::new(INPUT_RATE)
+        .expect("48 kHz is valid")
+        .process(&mono)
+        .expect("sine can be resampled");
+
+    for block in [160, 480, 1_024, 7_777] {
+        let mut resampler = StreamResampler::new(INPUT_RATE).expect("48 kHz is valid");
+        let mut streamed = Vec::new();
+        for part in mono.chunks(block) {
+            streamed.extend(resampler.push(part).expect("sine can be resampled"));
+        }
+        streamed.extend(resampler.flush().expect("the tail can be resampled"));
+
+        assert!(
+            streamed.len() <= batch.len() && streamed.len() + TAIL_ALLOWANCE >= batch.len(),
+            "block {block}: {} streamed frames against {} batch frames",
+            streamed.len(),
+            batch.len()
+        );
+        assert_eq!(
+            streamed,
+            batch[..streamed.len()],
+            "block {block}: the stream is not the clip"
+        );
+    }
+}
+
+/// A microphone already running at the target rate is passed through, blocks and all.
+#[test]
+fn streamed_resampling_passes_16khz_capture_through() {
+    let mut resampler = StreamResampler::new(TARGET_SAMPLE_RATE).expect("16 kHz is valid");
+
+    assert_eq!(
+        resampler
+            .push(&[0.25, -0.5])
+            .expect("passthrough cannot fail"),
+        vec![0.25, -0.5]
+    );
+    assert!(resampler
+        .flush()
+        .expect("passthrough cannot fail")
+        .is_empty());
 }

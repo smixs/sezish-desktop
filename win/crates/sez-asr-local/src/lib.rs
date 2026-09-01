@@ -6,6 +6,7 @@ mod downloader;
 #[cfg(feature = "local-inference")]
 mod inference;
 mod model_store;
+pub mod stream;
 
 pub use ctc::{CtcDecoder, Vocab, VocabError};
 pub use downloader::{ModelDownloadError, ModelDownloader};

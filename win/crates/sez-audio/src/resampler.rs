@@ -1,5 +1,5 @@
 use rubato::audioadapter_buffers::direct::InterleavedSlice;
-use rubato::{Fft, FixedSync, Resampler};
+use rubato::{Fft, FixedSync, Indexing, Resampler};
 use thiserror::Error;
 
 /// Output sample rate required by `sez_core::Mic`.
@@ -31,17 +31,10 @@ pub struct MonoResampler {
 impl MonoResampler {
     /// Constructs a reusable mono resampler for `source_rate`.
     pub fn new(source_rate: u32) -> Result<Self, ResampleError> {
-        if source_rate == 0 {
-            return Err(ResampleError::InvalidSourceRate);
-        }
-        let inner = Fft::<f32>::new(
-            source_rate as usize,
-            TARGET_SAMPLE_RATE as usize,
-            1_024,
-            1,
-            FixedSync::Both,
-        )?;
-        Ok(Self { source_rate, inner })
+        Ok(Self {
+            source_rate,
+            inner: fft(source_rate)?,
+        })
     }
 
     /// Resamples one complete mono clip, trimming filter delay and preserving its duration.
@@ -58,4 +51,96 @@ impl MonoResampler {
         let output = self.inner.process_all(&adapter, input.len(), None)?;
         Ok(output.take_data())
     }
+}
+
+/// Resamples a recording to 16 kHz while it is still being captured.
+///
+/// [`MonoResampler`] sees a whole clip at once; this one sees it a block at a time and keeps
+/// the filter state between blocks, so consecutive blocks join without a seam. The startup
+/// delay is trimmed off the first output, the same as [`MonoResampler::process`] does, so both
+/// render the same recording the same way.
+pub struct StreamResampler {
+    source_rate: u32,
+    inner: Fft<f32>,
+    /// Captured samples that are not a whole block yet.
+    pending: Vec<f32>,
+    /// Output frames of startup delay still to be discarded.
+    delay: usize,
+}
+
+impl StreamResampler {
+    /// Constructs a resampler for one recording captured at `source_rate`.
+    pub fn new(source_rate: u32) -> Result<Self, ResampleError> {
+        let inner = fft(source_rate)?;
+        let delay = inner.output_delay();
+        Ok(Self {
+            source_rate,
+            inner,
+            pending: Vec::new(),
+            delay,
+        })
+    }
+
+    /// Everything that became ready once `input` is appended to what the last call left over.
+    pub fn push(&mut self, input: &[f32]) -> Result<Vec<f32>, ResampleError> {
+        if self.source_rate == TARGET_SAMPLE_RATE {
+            return Ok(input.to_vec());
+        }
+        self.pending.extend_from_slice(input);
+
+        let mut output = Vec::new();
+        while self.pending.len() >= self.inner.input_frames_next() {
+            let frames = self.inner.input_frames_next();
+            let block = self.block(frames, None)?;
+            self.pending.drain(..frames);
+            output.extend_from_slice(&self.trimmed(block));
+        }
+        Ok(output)
+    }
+
+    /// The last, partial block, once the recording is over.
+    pub fn flush(&mut self) -> Result<Vec<f32>, ResampleError> {
+        if self.source_rate == TARGET_SAMPLE_RATE || self.pending.is_empty() {
+            return Ok(Vec::new());
+        }
+        let frames = self.pending.len();
+        // The resampler always writes a whole output block, padding the missing input with
+        // silence. Only the frames the remaining input is worth are kept.
+        let expected =
+            (frames as f64 * f64::from(TARGET_SAMPLE_RATE) / f64::from(self.source_rate)) as usize;
+        let block = self.block(frames, Some(frames))?;
+        self.pending.clear();
+
+        let mut output = self.trimmed(block);
+        output.truncate(expected);
+        Ok(output)
+    }
+
+    fn block(&mut self, frames: usize, partial: Option<usize>) -> Result<Vec<f32>, ResampleError> {
+        let adapter = InterleavedSlice::new(&self.pending[..frames], 1, frames)
+            .map_err(|error| ResampleError::InvalidInput(error.to_string()))?;
+        let indexing = partial.map(|len| Indexing::new().partial_len(len));
+        let output = self.inner.process(&adapter, indexing.as_ref())?;
+        Ok(output.take_data())
+    }
+
+    fn trimmed(&mut self, mut block: Vec<f32>) -> Vec<f32> {
+        let trim = self.delay.min(block.len());
+        self.delay -= trim;
+        block.drain(..trim);
+        block
+    }
+}
+
+fn fft(source_rate: u32) -> Result<Fft<f32>, ResampleError> {
+    if source_rate == 0 {
+        return Err(ResampleError::InvalidSourceRate);
+    }
+    Ok(Fft::<f32>::new(
+        source_rate as usize,
+        TARGET_SAMPLE_RATE as usize,
+        1_024,
+        1,
+        FixedSync::Both,
+    )?)
 }

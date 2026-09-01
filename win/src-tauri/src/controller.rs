@@ -551,8 +551,15 @@ impl AppController {
             lock_recover(&self.model_idle).mark_unloaded();
         }
         let clock: Arc<dyn Clock> = self.clock.clone();
+        let mut mic = CpalMic::new(clock);
+        if let ActiveTranscriber::Local(local) = &transcriber {
+            // The local model runs the recording chunk by chunk while the user is still
+            // speaking, so releasing the hotkey only leaves the tail to transcribe.
+            let sink = local.clone();
+            mic.set_tap(Arc::new(move |samples: &[i16]| sink.feed(samples)));
+        }
         runtime.coordinator = Some(Coordinator::new(
-            CpalMic::new(clock),
+            mic,
             transcriber,
             PlatformInserter::new(),
             self.history.clone(),

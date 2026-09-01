@@ -44,17 +44,82 @@ pub fn split_with(samples: &[f32], limit: usize, search_window: usize) -> Vec<Ra
 
     let mut ranges = Vec::new();
     let mut start = 0;
-    while samples.len() - start > limit {
-        let hard = start + limit;
-        // The quiet spot is searched for behind the ideal boundary only: moving it forward
-        // would push the chunk past the limit the whole exercise is about.
-        let earliest = (start + 1).max(hard.saturating_sub(search_window));
-        let cut = quietest_cut(samples, earliest, hard).unwrap_or(hard);
+    while let Some(cut) = next_cut(samples, start, limit, search_window) {
         ranges.push(start..cut);
         start = cut;
     }
     ranges.push(start..samples.len());
     ranges
+}
+
+/// Where the chunk starting at `start` ends, or `None` when what is left already fits in
+/// `limit`. Only samples before the boundary decide it, so a recording still being spoken gets
+/// the same answer here as the finished one gets from [`split`].
+fn next_cut(samples: &[f32], start: usize, limit: usize, search_window: usize) -> Option<usize> {
+    if samples.len() - start <= limit {
+        return None;
+    }
+    let hard = start + limit;
+    // The quiet spot is searched for behind the ideal boundary only: moving it forward would
+    // push the chunk past the limit the whole exercise is about.
+    let earliest = (start + 1).max(hard.saturating_sub(search_window));
+    Some(quietest_cut(samples, earliest, hard).unwrap_or(hard))
+}
+
+/// The streaming half of the chunker: samples arrive a little at a time and a chunk leaves as
+/// soon as its end is certain, which is the moment more than `limit` is buffered.
+///
+/// Because [`next_cut`] reads nothing past the boundary it returns, the chunks that come out
+/// here are exactly the ones [`split`] produces over the same recording once it is finished.
+pub struct StreamCutter {
+    pending: Vec<f32>,
+    limit: usize,
+    search_window: usize,
+}
+
+impl StreamCutter {
+    /// A cutter with the shipped limit and search window.
+    pub fn new() -> Self {
+        Self::with_limits(DEFAULT_LIMIT, SEARCH_WINDOW)
+    }
+
+    /// [`StreamCutter::new`] with the limit and search window spelled out, for tests that
+    /// cannot afford minutes of synthetic audio.
+    ///
+    /// # Panics
+    ///
+    /// Panics when `limit` is zero: no chunk satisfies it.
+    pub fn with_limits(limit: usize, search_window: usize) -> Self {
+        assert!(limit > 0, "limit must be positive");
+        Self {
+            pending: Vec::new(),
+            limit,
+            search_window,
+        }
+    }
+
+    /// Buffers the samples captured since the last call.
+    pub fn append(&mut self, samples: &[f32]) {
+        self.pending.extend_from_slice(samples);
+    }
+
+    /// The next chunk whose boundary is already decided, or `None` while everything buffered
+    /// still fits one chunk and could yet grow into it.
+    pub fn next_chunk(&mut self) -> Option<Vec<f32>> {
+        let cut = next_cut(&self.pending, 0, self.limit, self.search_window)?;
+        Some(self.pending.drain(..cut).collect())
+    }
+
+    /// Everything left over once the recording is over. Never longer than the limit.
+    pub fn take_rest(&mut self) -> Vec<f32> {
+        std::mem::take(&mut self.pending)
+    }
+}
+
+impl Default for StreamCutter {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 /// Middle of the quietest probe window in `from..to`, or `None` when the whole stretch is
@@ -91,7 +156,7 @@ fn rms(window: &[f32]) -> f32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{split, split_with, DEFAULT_LIMIT};
+    use super::{split, split_with, StreamCutter, DEFAULT_LIMIT};
 
     /// Loud enough that no probe window reads as silence.
     fn speech(count: usize) -> Vec<f32> {
@@ -235,5 +300,62 @@ mod tests {
 
         assert_eq!(chunks.len(), 4);
         assert!(chunks.iter().all(|chunk| chunk.len() <= DEFAULT_LIMIT));
+    }
+
+    /// Feeds the whole recording through the cutter in blocks of `block` samples and returns
+    /// the chunks it produced, the last one being what the release of the hotkey leaves.
+    fn stream(samples: &[f32], block: usize, limit: usize, search_window: usize) -> Vec<Vec<f32>> {
+        let mut cutter = StreamCutter::with_limits(limit, search_window);
+        let mut chunks = Vec::new();
+        for part in samples.chunks(block) {
+            cutter.append(part);
+            while let Some(chunk) = cutter.next_chunk() {
+                chunks.push(chunk);
+            }
+        }
+        chunks.push(cutter.take_rest());
+        chunks
+    }
+
+    /// The point of the exercise: a recording cut while it is still being spoken comes out
+    /// exactly as the finished one does, whatever size the capture blocks happen to be.
+    #[test]
+    fn streamed_chunks_match_the_ones_split_produces() {
+        let mut samples = speech(250_000);
+        for gap in [85_000..91_000, 180_000..186_000] {
+            samples[gap].fill(0.0);
+        }
+
+        for block in [1, 999, 4_096, 100_000, 250_000] {
+            let chunks = stream(&samples, block, 100_000, 20_000);
+            let ranges = split_with(&samples, 100_000, 20_000);
+
+            assert_eq!(
+                chunks.iter().map(Vec::len).collect::<Vec<_>>(),
+                ranges.iter().map(std::ops::Range::len).collect::<Vec<_>>(),
+                "block {block}: the stream cut somewhere else"
+            );
+            assert_eq!(
+                chunks.concat(),
+                samples,
+                "block {block}: the stream lost or reordered samples"
+            );
+        }
+    }
+
+    /// A chunk is only certain once the buffer outgrows the limit: until then the samples
+    /// could still turn out to belong to it.
+    #[test]
+    fn nothing_leaves_while_the_buffer_could_still_be_one_chunk() {
+        let samples = speech(100_001);
+        let mut cutter = StreamCutter::with_limits(100_000, 20_000);
+
+        cutter.append(&samples[..100_000]);
+        assert!(cutter.next_chunk().is_none());
+
+        cutter.append(&samples[100_000..]);
+        assert!(cutter.next_chunk().is_some());
+        assert!(cutter.next_chunk().is_none());
+        assert_eq!(cutter.take_rest().len(), 1);
     }
 }
