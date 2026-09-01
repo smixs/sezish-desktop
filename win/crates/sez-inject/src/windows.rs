@@ -1,3 +1,7 @@
+use crate::typing::{
+    batch_len, build_typing_events, choose_route, classify, InsertRoute, TypeEvent, TypeOutcome,
+    TypeUnit, TypedKey,
+};
 use crate::{
     Clipboard, InsertionEngine, Key, KeyEvent, KeyState, PASTE_CHORD_EVENT_COUNT, RESTORE_DELAY,
 };
@@ -12,7 +16,7 @@ use windows::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM
 use windows::Win32::System::Ole::CF_UNICODETEXT;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP,
-    VIRTUAL_KEY, VK_CONTROL, VK_V,
+    KEYEVENTF_UNICODE, VIRTUAL_KEY, VK_CONTROL, VK_RETURN, VK_TAB, VK_V,
 };
 
 /// Real Win32 Unicode clipboard adapter.
@@ -140,7 +144,28 @@ impl Default for WindowsInserter {
 
 #[async_trait]
 impl Inserter for WindowsInserter {
+    /// Empty text is inserted as nothing at all: no events, no clipboard write.
     async fn insert(&self, text: &str) -> Result<(), SezError> {
+        if choose_route(text) == InsertRoute::Type {
+            let typed = text.to_owned();
+            let outcome = tokio::task::spawn_blocking(move || send_typed_text(&typed))
+                .await
+                .map_err(|error| SezError::Other(format!("typing task failed: {error}")))?;
+            match outcome {
+                TypeOutcome::Typed => return Ok(()),
+                // Pasting now would duplicate what already landed, so the text
+                // is only handed over - the user decides where it goes.
+                TypeOutcome::Partial => {
+                    WinClipboard.set_text(text);
+                    return Err(SezError::Other(
+                        "insertion stopped mid-text - the full dictation is on your clipboard"
+                            .to_owned(),
+                    ));
+                }
+                TypeOutcome::Blocked => {}
+            }
+        }
+
         let ticket = self.engine.insert_with(text, send_chord)?;
         let engine = self.engine.clone();
         tokio::spawn(async move {
@@ -148,6 +173,53 @@ impl Inserter for WindowsInserter {
             let _ = engine.restore(&ticket);
         });
         Ok(())
+    }
+}
+
+/// Upper bound of events per `SendInput` call; one array is one atomic batch.
+const TYPING_BATCH_EVENTS: usize = 512;
+
+/// Types text as tagged unicode events, bypassing the clipboard entirely.
+fn send_typed_text(text: &str) -> TypeOutcome {
+    let events = build_typing_events(text);
+    let mut accepted = 0usize;
+    let mut rest = events.as_slice();
+
+    while !rest.is_empty() {
+        let (batch, tail) = rest.split_at(batch_len(rest, TYPING_BATCH_EVENTS));
+        let inputs: Vec<INPUT> = batch.iter().map(type_input).collect();
+        let sent = unsafe { SendInput(&inputs, std::mem::size_of::<INPUT>() as i32) } as usize;
+        accepted += sent;
+        if sent != inputs.len() {
+            break;
+        }
+        rest = tail;
+    }
+
+    classify(accepted, events.len())
+}
+
+fn type_input(event: &TypeEvent) -> INPUT {
+    let (virtual_key, scan_code, mut flags) = match event.unit {
+        TypeUnit::Unicode(unit) => (VIRTUAL_KEY(0), unit, KEYEVENTF_UNICODE),
+        TypeUnit::Key(TypedKey::Return) => (VK_RETURN, 0, KEYBD_EVENT_FLAGS(0)),
+        TypeUnit::Key(TypedKey::Tab) => (VK_TAB, 0, KEYBD_EVENT_FLAGS(0)),
+    };
+    if event.state == KeyState::Up {
+        flags |= KEYEVENTF_KEYUP;
+    }
+
+    INPUT {
+        r#type: INPUT_KEYBOARD,
+        Anonymous: INPUT_0 {
+            ki: KEYBDINPUT {
+                wVk: virtual_key,
+                wScan: scan_code,
+                dwFlags: flags,
+                time: 0,
+                dwExtraInfo: event.extra_info,
+            },
+        },
     }
 }
 

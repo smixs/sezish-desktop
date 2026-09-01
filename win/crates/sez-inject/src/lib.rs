@@ -9,7 +9,12 @@ pub const SELF_INJECTION_TAG: usize = 0x5E21_5E21;
 pub const MAX_SEND_ATTEMPTS: usize = 3;
 
 /// Delay before a successful insertion may restore the previous clipboard.
-pub const RESTORE_DELAY: Duration = Duration::from_millis(625);
+///
+/// Slow windows (a terminal running a TUI) can handle the synthetic Ctrl+V
+/// well after a second, and an early restore makes them paste the *previous*
+/// dictation. The clipboard path is now the rare fallback, so the window is
+/// wide.
+pub const RESTORE_DELAY: Duration = Duration::from_millis(2000);
 
 /// Number of events in one batched Ctrl+V chord.
 pub const PASTE_CHORD_EVENT_COUNT: usize = 4;
@@ -201,9 +206,14 @@ fn manual_paste_error() -> SezError {
     )
 }
 
+mod typing;
 #[cfg(windows)]
 mod windows;
 
+pub use typing::{
+    batch_len, build_typing_events, choose_route, classify, InsertRoute, TypeEvent, TypeOutcome,
+    TypeUnit, TypedKey, MAX_TYPED_UNITS,
+};
 #[cfg(windows)]
 pub use windows::{WinClipboard, WindowsInserter};
 
