@@ -23,12 +23,12 @@ use sez_hotkey::{Command, HotkeyMode, Shortcut};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex as SyncMutex, MutexGuard};
-use std::time::{Duration, UNIX_EPOCH};
+use std::time::{Duration, Instant, UNIX_EPOCH};
 use tauri::AppHandle;
 use tauri_plugin_updater::UpdaterExt;
 use tokio::sync::Mutex;
 
-const MODEL_IDLE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
+const MODEL_IDLE_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 const MODEL_IDLE_POLL: Duration = Duration::from_secs(30);
 
 type AppCoordinator = Coordinator<CpalMic, ActiveTranscriber, PlatformInserter, SharedHistory>;
@@ -118,6 +118,8 @@ pub struct AppController {
     model_idle: SyncMutex<ModelIdlePolicy>,
     clock: Arc<SystemClock>,
     recording: Arc<AtomicBool>,
+    /// When the current dictation started recording, for the summary line in `end`.
+    recording_since: SyncMutex<Option<Instant>>,
     hotkey: SyncMutex<Option<HotkeyAdapter>>,
     cloud_credentials: Option<CloudCredentials>,
 }
@@ -150,10 +152,12 @@ impl AppController {
             model_idle: SyncMutex::new(ModelIdlePolicy::new(MODEL_IDLE_TIMEOUT)),
             clock: Arc::new(SystemClock::new()),
             recording: Arc::new(AtomicBool::new(false)),
+            recording_since: SyncMutex::new(None),
             hotkey: SyncMutex::new(None),
             cloud_credentials: baked_cloud_credentials(),
         });
 
+        sez_asr_local::set_logger(crate::obs::log);
         {
             let mut runtime = controller.runtime.lock().await;
             controller.rebuild_locked(&mut runtime, false)?;
@@ -178,7 +182,14 @@ impl AppController {
             return Err(AppError::busy("dictation is already active"));
         }
         if runtime.coordinator.is_none() {
-            self.rebuild_locked(&mut runtime, true)?;
+            // Rebuilding reloads the local model, which takes seconds on a cold disk
+            // cache; the tray says busy instead of looking asleep.
+            self.tray.set_phase(&self.app, TrayPhase::Transcribing);
+            let rebuilt = self.rebuild_locked(&mut runtime, true);
+            if rebuilt.is_err() || runtime.coordinator.is_none() {
+                self.tray.set_phase(&self.app, TrayPhase::Idle);
+            }
+            rebuilt?;
         }
         let coordinator = runtime.coordinator.as_mut().ok_or_else(|| {
             AppError::not_ready("Local model is required. Download it from the sezish tray menu.")
@@ -194,6 +205,7 @@ impl AppController {
         }
 
         self.recording.store(true, Ordering::Release);
+        *lock_recover(&self.recording_since) = Some(Instant::now());
         if runtime.coordinator_mode == Some(TranscriptionPreference::Local) {
             lock_recover(&self.model_idle).on_active();
         }
@@ -206,6 +218,9 @@ impl AppController {
 
     pub async fn end(&self) -> Result<DictationOutcomeDto, AppError> {
         self.recording.store(false, Ordering::Release);
+        let recorded_for = lock_recover(&self.recording_since)
+            .take()
+            .map(|since| since.elapsed());
         let mut runtime = self.runtime.lock().await;
         let Some(coordinator) = runtime.coordinator.as_mut() else {
             self.tray.set_phase(&self.app, TrayPhase::Idle);
@@ -217,7 +232,16 @@ impl AppController {
         }
 
         self.tray.set_phase(&self.app, TrayPhase::Transcribing);
+        let released_at = Instant::now();
         let outcome = coordinator.end().await;
+        crate::obs::log(&format!(
+            "dictation end: audio={} total={:.1}s outcome={outcome:?}",
+            recorded_for.map_or_else(
+                || "unknown".to_owned(),
+                |audio| format!("{:.1}s", audio.as_secs_f64())
+            ),
+            released_at.elapsed().as_secs_f64()
+        ));
         let used_mode = runtime.coordinator_mode;
         if used_mode == Some(TranscriptionPreference::Local) {
             lock_recover(&self.model_idle).on_idle(self.clock.as_ref());
@@ -528,14 +552,23 @@ impl AppController {
                     })
                     .map(|file| self.model_store.local_path(file))
                     .ok_or_else(|| AppError::not_ready("local model file is unavailable"))?;
+                let load_started = Instant::now();
                 match LocalTranscriber::new(model_path) {
                     Ok(transcriber) => {
+                        crate::obs::log(&format!(
+                            "model load ok in {}ms",
+                            load_started.elapsed().as_millis()
+                        ));
                         self.set_model_status(ModelStatusDto::Ready);
                         lock_recover(&self.model_idle).on_loaded();
                         ActiveTranscriber::Local(transcriber)
                     }
                     Err(error) => {
                         let message = format!("Local model could not be loaded: {error}");
+                        crate::obs::log(&format!(
+                            "model load failed in {}ms: {error}",
+                            load_started.elapsed().as_millis()
+                        ));
                         self.set_model_status(ModelStatusDto::Failed {
                             message: message.clone(),
                         });
@@ -665,9 +698,17 @@ impl AppController {
                 .coordinator
                 .as_ref()
                 .is_some_and(|coordinator| coordinator.state() == State::Idle);
-        if local_is_idle && lock_recover(&self.model_idle).unload_if_idle(self.clock.as_ref()) {
+        if !local_is_idle {
+            return;
+        }
+        let idle_for = lock_recover(&self.model_idle).idle_for(self.clock.as_ref());
+        if lock_recover(&self.model_idle).unload_if_idle(self.clock.as_ref()) {
             runtime.coordinator = None;
             runtime.coordinator_mode = None;
+            crate::obs::log(&format!(
+                "model unload (idle {:.0}s)",
+                idle_for.unwrap_or_default().as_secs_f64()
+            ));
         }
     }
 

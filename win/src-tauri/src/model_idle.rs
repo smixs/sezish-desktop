@@ -49,6 +49,15 @@ impl ModelIdlePolicy {
         should_unload
     }
 
+    /// How long the loaded model has been idle, for the log line.
+    pub fn idle_for<C>(&self, clock: &C) -> Option<Duration>
+    where
+        C: Clock + ?Sized,
+    {
+        self.idle_since
+            .map(|idle_since| clock.now().saturating_sub(idle_since))
+    }
+
     pub fn mark_unloaded(&mut self) {
         self.loaded = false;
         self.idle_since = None;

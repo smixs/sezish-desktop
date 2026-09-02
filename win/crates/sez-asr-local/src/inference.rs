@@ -4,9 +4,10 @@ use sez_core::{SezError, Transcriber};
 use std::{
     path::Path,
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc, Mutex, MutexGuard, PoisonError,
     },
+    time::Instant,
 };
 use thiserror::Error;
 use tokio::runtime::Handle;
@@ -64,6 +65,8 @@ struct Inner {
     /// One drain in flight at a time: samples arrive every few milliseconds, a chunk takes
     /// seconds, and a task per block would pile up behind the take lock.
     draining: AtomicBool,
+    /// Chunks streamed in the current take, for the log line alone.
+    streamed_chunks: AtomicUsize,
 }
 
 /// Two-stage ONNX Runtime local transcription adapter.
@@ -96,6 +99,7 @@ impl LocalTranscriber {
                 inbox: Mutex::new(Vec::new()),
                 take: Mutex::new(StreamTake::new()),
                 draining: AtomicBool::new(false),
+                streamed_chunks: AtomicUsize::new(0),
             }),
             runtime,
         })
@@ -116,6 +120,7 @@ impl LocalTranscriber {
     fn start_stream(&self) {
         lock(&self.inner.inbox).clear();
         lock(&self.inner.take).start();
+        self.inner.streamed_chunks.store(0, Ordering::Release);
     }
 
     fn schedule_drain(&self) {
@@ -139,7 +144,17 @@ impl LocalTranscriber {
                 return;
             }
             take.append(&waveform(&queued));
-            take.transcribe_ready(|chunk| self.run_locked(chunk));
+            take.transcribe_ready(|chunk| {
+                let started = Instant::now();
+                let result = self.run_locked(chunk);
+                let n = self.inner.streamed_chunks.fetch_add(1, Ordering::AcqRel) + 1;
+                crate::log(&format!(
+                    "stream chunk n={n} audio={} infer={}ms",
+                    seconds(chunk.len()),
+                    started.elapsed().as_millis()
+                ));
+                result
+            });
         }
     }
 
@@ -148,6 +163,9 @@ impl LocalTranscriber {
     fn finish_stream(&self, recorded: usize) -> Result<Option<String>, LocalTranscriberError> {
         let mut take = lock(&self.inner.take);
         if !take.is_open() {
+            crate::log(&format!(
+                "stream fallback reason=not_open recorded={recorded}"
+            ));
             return Ok(None);
         }
         let queued = std::mem::take(&mut *lock(&self.inner.inbox));
@@ -156,12 +174,30 @@ impl LocalTranscriber {
         // The stream is only trusted when it saw the whole take. A microphone that was never
         // tapped, or one whose stream broke halfway, must not silently swallow the middle of a
         // dictation: the caller still has every sample and can transcribe them all.
-        if take.fed() + STREAM_COVERAGE_SLACK < recorded {
+        let fed = take.fed();
+        if fed + STREAM_COVERAGE_SLACK < recorded {
             take.discard();
+            crate::log(&format!(
+                "stream fallback reason=coverage fed={fed} recorded={recorded}"
+            ));
             return Ok(None);
         }
 
-        take.finish(|chunk| self.run_locked(chunk)).map(Some)
+        let mut tail_samples = 0_usize;
+        let mut infer = std::time::Duration::ZERO;
+        let text = take.finish(|chunk| {
+            let started = Instant::now();
+            let result = self.run_locked(chunk);
+            infer += started.elapsed();
+            tail_samples = chunk.len();
+            result
+        })?;
+        crate::log(&format!(
+            "stream finish fed={fed} recorded={recorded} tail={} infer={}ms",
+            seconds(tail_samples),
+            infer.as_millis()
+        ));
+        Ok(Some(text))
     }
 
     fn run_locked(&self, waveform: &[f32]) -> Result<String, LocalTranscriberError> {
@@ -194,13 +230,21 @@ impl LocalTranscriber {
         // One buffer past the length the model was trained on comes back as mush, so long
         // audio is cut at silences and run piece by piece. A failing piece fails the take:
         // half a transcript is worse than an error the caller can retry.
+        let started = Instant::now();
         let mut parts = Vec::new();
+        let mut chunks = 0_usize;
         for chunk in chunker::split(&waveform) {
+            chunks += 1;
             let text = Self::run(&mut sessions, &self.inner.vocab, &waveform[chunk])?;
             if !text.is_empty() {
                 parts.push(text);
             }
         }
+        crate::log(&format!(
+            "batch transcribe audio={} chunks={chunks} infer={}ms",
+            seconds(waveform.len()),
+            started.elapsed().as_millis()
+        ));
         Ok(parts.join(" "))
     }
 
@@ -269,6 +313,11 @@ impl LocalTranscriber {
             .collect::<Vec<_>>();
         Ok(CtcDecoder::decode(&frames, &vocab.tokens, vocab.blank_id))
     }
+}
+
+/// Sample count as seconds for the log, at the 16 kHz the pipeline runs at.
+fn seconds(samples: usize) -> String {
+    format!("{:.1}s", samples as f64 / 16_000.0)
 }
 
 /// PCM16 as the model wants it, normalized to `[-1, 1]`.

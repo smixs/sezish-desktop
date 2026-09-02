@@ -48,6 +48,10 @@ mod windows_adapter {
         /// When the last swallowed press edge arrived. A swallowed key never
         /// reaches the async key state, so this is the only trace it leaves.
         last_swallowed_press_at: Option<Duration>,
+        /// Press edges seen since the key went down and when it went down. Auto-repeat
+        /// fires ~27 times a second, so the hold is logged once, on release.
+        press_repeats: u32,
+        press_started_at: Option<Duration>,
         on_command: Box<dyn FnMut(Command)>,
         on_cancel: Box<dyn FnMut()>,
     }
@@ -96,6 +100,8 @@ mod windows_adapter {
                             recording,
                             swallowing_escape: false,
                             last_swallowed_press_at: None,
+                            press_repeats: 0,
+                            press_started_at: None,
                             on_command: Box::new(on_command),
                             on_cancel: Box::new(on_cancel),
                         });
@@ -337,18 +343,32 @@ mod windows_adapter {
                 } else {
                     (shortcut_currently_held(&context.shortcut), None)
                 };
+                let recording = context.recording.load(Ordering::Acquire);
+                let inputs = format!(
+                    "recording={recording} physically_held={physically_held} press_age={}",
+                    press_age
+                        .map_or_else(|| "none".to_owned(), |age| format!("{}ms", age.as_millis()))
+                );
                 if !hold_rearm_allowed(
                     context.interpreter.mode,
-                    context.recording.load(Ordering::Acquire),
+                    recording,
                     physically_held,
                     press_age,
                     SWALLOWED_PRESS_HOLD_WINDOW,
                 ) {
+                    crate::obs::log(&format!("health rearm blocked: {inputs}"));
                     return false;
                 }
                 let command = context.interpreter.key_released();
                 context.interpreter.reset();
+                context.press_repeats = 0;
+                context.press_started_at = None;
                 if command != Command::None {
+                    // Only a rearm that changed something is worth a line: the idle
+                    // tick every 30 s would otherwise fill the log by itself.
+                    crate::obs::log(&format!(
+                        "hook synthetic release (health rearm) -> {command:?}: {inputs}"
+                    ));
                     (context.on_command)(command);
                 }
             }
@@ -414,14 +434,37 @@ mod windows_adapter {
                     let decision = context.shortcut.evaluate(&key_event, context.combo_engaged);
                     context.combo_engaged = decision.engaged;
                     if let Some(edge) = decision.edge {
-                        crate::obs::log(&format!(
-                            "hook edge={edge:?} vk=0x{:X} swallow={}",
-                            key_event.vk, decision.swallow
-                        ));
+                        let now = context.clock.now();
+                        match edge {
+                            Edge::Press => {
+                                if context.press_repeats == 0 {
+                                    context.press_started_at = Some(now);
+                                    crate::obs::log(&format!(
+                                        "hook edge=Press vk=0x{:X} swallow={}",
+                                        key_event.vk, decision.swallow
+                                    ));
+                                }
+                                context.press_repeats = context.press_repeats.saturating_add(1);
+                            }
+                            Edge::Release => {
+                                let held = context
+                                    .press_started_at
+                                    .map(|at| now.saturating_sub(at))
+                                    .unwrap_or_default();
+                                crate::obs::log(&format!(
+                                    "hook edge=Release vk=0x{:X} swallow={} repeats={} duration={:.1}s",
+                                    key_event.vk,
+                                    decision.swallow,
+                                    context.press_repeats,
+                                    held.as_secs_f64()
+                                ));
+                                context.press_repeats = 0;
+                                context.press_started_at = None;
+                            }
+                        }
                         if edge == Edge::Press && decision.swallow {
                             // Auto-repeat refreshes this while the key stays down;
                             // the health rearm reads it to spot a live hold.
-                            let now = context.clock.now();
                             context.last_swallowed_press_at = Some(now);
                         }
                         let command = match edge {

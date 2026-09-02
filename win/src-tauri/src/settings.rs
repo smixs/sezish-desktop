@@ -62,11 +62,15 @@ impl Settings {
         {
             settings.hotkey_mode = mode;
         }
-        if let Some(shortcut) = value
-            .get("shortcut")
-            .and_then(|value| serde_json::from_value(value.clone()).ok())
-        {
-            settings.shortcut = shortcut;
+        if let Some(stored) = value.get("shortcut") {
+            match serde_json::from_value(stored.clone()) {
+                Ok(shortcut) => settings.shortcut = shortcut,
+                // Silently falling back to the default is what made the startup log
+                // disagree with settings.json and with the hotkey that actually fired.
+                Err(error) => crate::obs::log(&format!(
+                    "settings: shortcut {stored} ignored, keeping default: {error}"
+                )),
+            }
         }
         if let Some(mode) = value
             .get("transcription_mode")
