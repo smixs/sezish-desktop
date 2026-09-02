@@ -16,7 +16,8 @@
     speed: 1.2,
     direction: 80, // degrees, converted to radians on upload
     intensity: 2,
-    scale: 1.6,
+    scale: 0.8, // inverse: the shader does (uv - 0.5) * u_scale, so halving it
+                // doubles the on-screen size of the plasma blobs. 0.53 = 3x.
     softness: 0.18,
     distortion: 0.3,
     complexity: 0.68,
