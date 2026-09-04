@@ -126,6 +126,14 @@ pub fn open_history_folder(controller: State<'_, Arc<AppController>>) -> Result<
     controller.open_history_folder()
 }
 
+/// One line from a webview into the file log. The HUD uses it to report whether
+/// the plasma rim runs on WebGL or fell back to the CSS gradient; there is no
+/// other way to see that from a field log.
+#[tauri::command]
+pub fn log_line(message: String) {
+    crate::obs::log(&message);
+}
+
 #[tauri::command]
 pub fn app_version(app: tauri::AppHandle) -> Result<String, AppError> {
     // The product version comes from tauri.conf.json (0.1.1), not the internal crate

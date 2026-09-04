@@ -126,7 +126,10 @@ const state = {
   updateMessage: "",
   updateMessageIsPreview: false,
   errors: {},
-  pollTimer: null
+  pollTimer: null,
+  // Set when the recorder refused a right-Shift pick, so the warning explains a
+  // shortcut that was not applied.
+  rightShiftRejected: false
 };
 
 const elements = {};
@@ -292,9 +295,10 @@ function renderControls() {
     );
   }
   const rightShiftPicked =
-    Boolean(settings.shortcut) &&
-    settings.shortcut.kind === "modifier" &&
-    settings.shortcut.vk === MODIFIER_CODES.ShiftRight;
+    state.rightShiftRejected ||
+    (Boolean(settings.shortcut) &&
+      settings.shortcut.kind === "modifier" &&
+      settings.shortcut.vk === MODIFIER_CODES.ShiftRight);
   elements["shortcut-warning"].textContent = rightShiftPicked
     ? currentStrings().rightShiftWarning
     : "";
@@ -755,10 +759,26 @@ function onRecorderKeyup(event) {
   }
 }
 
+function isRightShift(shortcut) {
+  return (
+    Boolean(shortcut) &&
+    shortcut.kind === "modifier" &&
+    shortcut.vk === MODIFIER_CODES.ShiftRight
+  );
+}
+
 async function commitShortcut(shortcut) {
   recorder.committed = true;
   recorder.pendingModifier = null;
   await stopRecording();
+  if (isRightShift(shortcut)) {
+    // The warning says "choose another key", so the pick must not apply: the
+    // previous shortcut stays and the recorder ends with the warning shown.
+    state.rightShiftRejected = true;
+    renderAll();
+    return;
+  }
+  state.rightShiftRejected = false;
   state.settings.shortcut = shortcut;
   renderControls();
   try {

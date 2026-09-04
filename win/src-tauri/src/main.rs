@@ -52,6 +52,7 @@ fn run() -> tauri::Result<()> {
             ipc::start_dictation,
             ipc::stop_dictation,
             ipc::open_history_folder,
+            ipc::log_line,
             ipc::app_version,
             ipc::check_for_updates,
         ])
