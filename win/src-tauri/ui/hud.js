@@ -398,5 +398,20 @@
     else freeze();
   }
 
+  // One line in the file log so a field report can tell the shader rim from the
+  // CSS fallback; `.webgl-ok` alone is invisible from outside the webview.
+  function reportWebgl() {
+    var api = window.__TAURI__;
+    if (!api || !api.core || typeof api.core.invoke !== "function") return;
+    var ok = document.body.classList.contains("webgl-ok");
+    try {
+      var call = api.core.invoke("log_line", { message: "hud webgl=" + (ok ? "ok" : "fallback") });
+      if (call && typeof call.catch === "function") call.catch(function () {});
+    } catch (e) {
+      /* logging must never break the HUD */
+    }
+  }
+
   initPlasma();
+  reportWebgl();
 })();

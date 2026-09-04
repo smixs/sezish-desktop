@@ -122,6 +122,10 @@ pub struct AppController {
     recording: Arc<AtomicBool>,
     /// When the current dictation started recording, for the summary line in `end`.
     recording_since: SyncMutex<Option<Instant>>,
+    /// Armed right before the mic starts; the audio tap takes it on the first
+    /// captured sample and logs the offset. `begin ok` no longer marks the real
+    /// start of capture, so this is the only line that does.
+    capture_armed: Arc<SyncMutex<Option<Instant>>>,
     hotkey: SyncMutex<Option<HotkeyAdapter>>,
     cloud_credentials: Option<CloudCredentials>,
 }
@@ -155,6 +159,7 @@ impl AppController {
             clock: Arc::new(SystemClock::new()),
             recording: Arc::new(AtomicBool::new(false)),
             recording_since: SyncMutex::new(None),
+            capture_armed: Arc::new(SyncMutex::new(None)),
             hotkey: SyncMutex::new(None),
             cloud_credentials: baked_cloud_credentials(),
         });
@@ -201,6 +206,7 @@ impl AppController {
             AppError::not_ready("Local model is required. Download it from the sezish tray menu.")
         })?;
 
+        *lock_recover(&self.capture_armed) = Some(Instant::now());
         coordinator.begin().await;
         if coordinator.state() != State::Recording {
             self.recording.store(false, Ordering::Release);
@@ -624,7 +630,16 @@ impl AppController {
             // The local model runs the recording chunk by chunk while the user is still
             // speaking, so releasing the hotkey only leaves the tail to transcribe.
             let sink = local.clone();
-            mic.set_tap(Arc::new(move |samples: &[i16]| sink.feed(samples)));
+            let armed = self.capture_armed.clone();
+            mic.set_tap(Arc::new(move |samples: &[i16]| {
+                if let Some(begin) = lock_recover(&armed).take() {
+                    crate::obs::log(&format!(
+                        "capture first sample +{}ms",
+                        begin.elapsed().as_millis()
+                    ));
+                }
+                sink.feed(samples);
+            }));
         }
         runtime.coordinator = Some(Coordinator::new(
             mic,
