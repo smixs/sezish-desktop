@@ -4,8 +4,8 @@ use controller::AppController;
 use std::sync::Arc;
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 use tray::{
-    TrayUi, MENU_DICTATION, MENU_HISTORY, MENU_MODEL, MENU_QUIT, MENU_RECENT_PREFIX, MENU_SETTINGS,
-    MENU_UPDATES,
+    TrayUi, MENU_DICTATION, MENU_HISTORY, MENU_MODEL, MENU_MODEL_MULTILINGUAL,
+    MENU_MODEL_RU_EN_PUNCTUATED, MENU_QUIT, MENU_RECENT_PREFIX, MENU_SETTINGS, MENU_UPDATES,
 };
 
 mod controller;
@@ -42,6 +42,7 @@ fn run() -> tauri::Result<()> {
             ipc::begin_hotkey_capture,
             ipc::end_hotkey_capture,
             ipc::set_transcription_mode,
+            ipc::set_local_model,
             ipc::set_language,
             ipc::set_play_sounds,
             ipc::set_autostart,
@@ -99,6 +100,17 @@ fn handle_menu_event(app: &tauri::AppHandle, event: tauri::menu::MenuEvent) {
         MENU_MODEL => {
             let controller = app.state::<Arc<AppController>>();
             let _ = controller.inner().download_model();
+        }
+        MENU_MODEL_MULTILINGUAL | MENU_MODEL_RU_EN_PUNCTUATED => {
+            let model = if id == MENU_MODEL_MULTILINGUAL {
+                sez_asr_local::AsrModel::Multilingual
+            } else {
+                sez_asr_local::AsrModel::RuEnPunctuated
+            };
+            let controller = Arc::clone(app.state::<Arc<AppController>>().inner());
+            tauri::async_runtime::spawn(async move {
+                let _ = controller.set_local_model(model).await;
+            });
         }
         MENU_DICTATION => {
             let controller = Arc::clone(app.state::<Arc<AppController>>().inner());

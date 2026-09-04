@@ -4,6 +4,7 @@ use crate::dto::{
 };
 use crate::error::AppError;
 use crate::settings::{AppLanguage, HotkeyPreference, TranscriptionPreference};
+use sez_asr_local::AsrModel;
 use sez_hotkey::{vk, Shortcut};
 use std::sync::Arc;
 use tauri::State;
@@ -55,6 +56,14 @@ pub async fn set_transcription_mode(
     controller
         .set_transcription_mode(parse_transcription_mode(&mode)?)
         .await
+}
+
+#[tauri::command]
+pub async fn set_local_model(
+    controller: State<'_, Arc<AppController>>,
+    model: String,
+) -> Result<SettingsDto, AppError> {
+    controller.set_local_model(parse_local_model(&model)?).await
 }
 
 #[tauri::command]
@@ -207,6 +216,16 @@ fn parse_transcription_mode(mode: &str) -> Result<TranscriptionPreference, AppEr
         "local" => Ok(TranscriptionPreference::Local),
         _ => Err(AppError::invalid(
             "transcription mode must be either \"cloud\" or \"local\"",
+        )),
+    }
+}
+
+fn parse_local_model(model: &str) -> Result<AsrModel, AppError> {
+    match model {
+        "multilingual" => Ok(AsrModel::Multilingual),
+        "ru-en-punctuated" => Ok(AsrModel::RuEnPunctuated),
+        _ => Err(AppError::invalid(
+            "local model must be either \"multilingual\" or \"ru-en-punctuated\"",
         )),
     }
 }

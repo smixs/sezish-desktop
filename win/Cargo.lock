@@ -3644,6 +3644,7 @@ dependencies = [
  "httpmock",
  "ort",
  "reqwest 0.12.28",
+ "serde",
  "sez-core",
  "tempfile",
  "thiserror 2.0.19",

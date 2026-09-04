@@ -16,6 +16,11 @@ const strings = {
     cloudUnavailable: "Недоступно в этой сборке",
     localTitle: "Локально",
     localSubtitle: "Офлайн, речь не покидает компьютер. Модель 215 МБ",
+    modelSection: "Модель",
+    modelMultiTitle: "Русский, узбекский, казахский, кыргызский",
+    modelMultiSubtitle: "Без знаков препинания. 215 МБ",
+    modelRuEnTitle: "Русский и английский",
+    modelRuEnSubtitle: "Знаки препинания и заглавные буквы. 225 МБ",
     language: "Язык",
     general: "Общие",
     launchAtLogin: "Запуск при входе",
@@ -54,6 +59,11 @@ const strings = {
     cloudUnavailable: "Bu versiyada mavjud emas",
     localTitle: "Qurilmada",
     localSubtitle: "Oflayn, nutq kompyuterdan chiqmaydi. Model 215 MB",
+    modelSection: "Model",
+    modelMultiTitle: "Rus, oʼzbek, qozoq, qirgʼiz",
+    modelMultiSubtitle: "Tinish belgilarisiz. 215 MB",
+    modelRuEnTitle: "Rus va ingliz",
+    modelRuEnSubtitle: "Tinish belgilari va bosh harflar bilan. 225 MB",
     language: "Til",
     general: "Umumiy",
     launchAtLogin: "Kirishda ishga tushirish",
@@ -85,6 +95,7 @@ const fixture = {
     shortcut: { kind: "modifier", vk: 163 },
     transcription_mode: "cloud",
     effective_transcription_mode: "local",
+    local_model: "multilingual",
     language: null,
     resolved_language: "ru",
     play_sounds: true,
@@ -173,6 +184,13 @@ function cacheElements() {
     "local-subtitle",
     "recognition-error",
     "model-section",
+    "model-section-label",
+    "model-multilingual",
+    "model-multilingual-title",
+    "model-multilingual-subtitle",
+    "model-ru-en-punctuated",
+    "model-ru-en-punctuated-title",
+    "model-ru-en-punctuated-subtitle",
     "model-status",
     "model-error",
     "history-heading",
@@ -261,6 +279,11 @@ function renderText() {
   elements["cloud-unavailable"].textContent = t.cloudUnavailable;
   elements["local-title"].textContent = t.localTitle;
   elements["local-subtitle"].textContent = t.localSubtitle;
+  elements["model-section-label"].textContent = t.modelSection;
+  elements["model-multilingual-title"].textContent = t.modelMultiTitle;
+  elements["model-multilingual-subtitle"].textContent = t.modelMultiSubtitle;
+  elements["model-ru-en-punctuated-title"].textContent = t.modelRuEnTitle;
+  elements["model-ru-en-punctuated-subtitle"].textContent = t.modelRuEnSubtitle;
   elements["history-heading"].textContent = t.dictations;
   elements["open-folder"].textContent = t.openFolder;
   elements["updates-heading"].textContent = t.paneUpdates;
@@ -313,6 +336,14 @@ function renderControls() {
   );
   elements["model-section"].hidden =
     settings.effective_transcription_mode !== "local";
+  elements["model-multilingual"].setAttribute(
+    "aria-checked",
+    String(settings.local_model !== "ru-en-punctuated")
+  );
+  elements["model-ru-en-punctuated"].setAttribute(
+    "aria-checked",
+    String(settings.local_model === "ru-en-punctuated")
+  );
 }
 
 function createModelButton() {
@@ -461,6 +492,12 @@ async function fixtureInvoke(command, args = {}) {
     state.settings.transcription_mode = args.mode;
     state.settings.effective_transcription_mode =
       args.mode === "cloud" ? "local" : args.mode;
+    return { ...state.settings };
+  }
+  if (command === "set_local_model") {
+    state.settings.local_model = args.model;
+    state.modelStatus =
+      args.model === "multilingual" ? { kind: "ready" } : { kind: "missing" };
     return { ...state.settings };
   }
   if (command === "set_language") {
@@ -786,6 +823,21 @@ async function setTranscriptionMode(mode) {
   renderAll();
 }
 
+async function setLocalModel(model) {
+  const previous = { ...state.settings };
+  state.settings.local_model = model;
+  setError("model", null);
+  renderAll();
+  try {
+    applySettings(await invoke("set_local_model", { model }));
+    await refreshModelStatus();
+  } catch (error) {
+    state.settings = previous;
+    setError("model", error);
+  }
+  renderAll();
+}
+
 async function setLanguage(language) {
   const previousLanguage = state.language;
   const previousSettings = { ...state.settings };
@@ -915,6 +967,12 @@ function bindEvents() {
   );
   elements["mode-local"].addEventListener("click", () =>
     setTranscriptionMode("local")
+  );
+  elements["model-multilingual"].addEventListener("click", () =>
+    setLocalModel("multilingual")
+  );
+  elements["model-ru-en-punctuated"].addEventListener("click", () =>
+    setLocalModel("ru-en-punctuated")
   );
   elements["open-folder"].addEventListener("click", openHistoryFolder);
   elements["check-updates"].addEventListener("click", checkForUpdates);

@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use sez_asr_local::AsrModel;
 use sez_hotkey::Shortcut;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -30,6 +31,10 @@ pub struct Settings {
     pub hotkey_mode: HotkeyPreference,
     pub shortcut: Shortcut,
     pub transcription_mode: TranscriptionPreference,
+    /// Which downloaded bundle local transcription runs. Old settings files have no
+    /// such key and keep the multilingual model they already have on disk.
+    #[serde(default)]
+    pub local_model: AsrModel,
     pub language: Option<AppLanguage>,
     pub play_sounds: bool,
 }
@@ -40,6 +45,7 @@ impl Default for Settings {
             hotkey_mode: HotkeyPreference::Hold,
             shortcut: Shortcut::default(),
             transcription_mode: TranscriptionPreference::Cloud,
+            local_model: AsrModel::default(),
             language: None,
             play_sounds: true,
         }
@@ -77,6 +83,12 @@ impl Settings {
             .and_then(|value| serde_json::from_value(value.clone()).ok())
         {
             settings.transcription_mode = mode;
+        }
+        if let Some(model) = value
+            .get("local_model")
+            .and_then(|value| serde_json::from_value(value.clone()).ok())
+        {
+            settings.local_model = model;
         }
         if let Some(language) = value.get("language") {
             settings.language = serde_json::from_value(language.clone()).unwrap_or(None);
@@ -126,8 +138,8 @@ pub fn resolve_system_language(locale: &str) -> AppLanguage {
 #[cfg(test)]
 mod tests {
     use super::{
-        effective_transcription_mode, resolve_system_language, AppLanguage, HotkeyPreference,
-        Settings, TranscriptionPreference,
+        effective_transcription_mode, resolve_system_language, AppLanguage, AsrModel,
+        HotkeyPreference, Settings, TranscriptionPreference,
     };
     use sez_hotkey::{Modifiers, Shortcut};
     use std::fs;
@@ -142,6 +154,7 @@ mod tests {
             r#"{
                 "hotkey_mode": "stale",
                 "transcription_mode": "local",
+                "local_model": "ru-en-punctuated",
                 "language": "uz",
                 "play_sounds": false
             }"#,
@@ -156,6 +169,7 @@ mod tests {
                 hotkey_mode: HotkeyPreference::Hold,
                 shortcut: Shortcut::default(),
                 transcription_mode: TranscriptionPreference::Local,
+                local_model: AsrModel::RuEnPunctuated,
                 language: Some(AppLanguage::Uz),
                 play_sounds: false,
             }
@@ -173,7 +187,10 @@ mod tests {
         )
         .expect("legacy fixture should be written");
 
-        assert_eq!(Settings::load(&path).shortcut, Shortcut::default());
+        let loaded = Settings::load(&path);
+        assert_eq!(loaded.shortcut, Shortcut::default());
+        // Pre-0.1.10 files have no "local_model" either: they keep the model on disk.
+        assert_eq!(loaded.local_model, AsrModel::Multilingual);
     }
 
     #[test]
@@ -222,6 +239,7 @@ mod tests {
                 hotkey_mode: HotkeyPreference::Hold,
                 shortcut: Shortcut::default(),
                 transcription_mode: TranscriptionPreference::Cloud,
+                local_model: AsrModel::Multilingual,
                 language: None,
                 play_sounds: true,
             }

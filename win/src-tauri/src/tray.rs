@@ -1,12 +1,15 @@
 use crate::dto::{DictationEntryDto, ModelStatusDto};
 use crate::hud::Hud;
-use crate::settings::TranscriptionPreference;
+use crate::settings::{AppLanguage, TranscriptionPreference};
+use sez_asr_local::AsrModel;
 use tauri::image::Image;
-use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
+use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
 use tauri::{include_image, App};
 
 pub const MENU_DICTATION: &str = "dictation";
 pub const MENU_MODEL: &str = "model";
+pub const MENU_MODEL_MULTILINGUAL: &str = "model-multilingual";
+pub const MENU_MODEL_RU_EN_PUNCTUATED: &str = "model-ru-en-punctuated";
 pub const MENU_SETTINGS: &str = "settings";
 pub const MENU_HISTORY: &str = "history";
 pub const MENU_UPDATES: &str = "updates";
@@ -26,6 +29,8 @@ pub struct TrayUi {
     state: MenuItem<tauri::Wry>,
     dictation: MenuItem<tauri::Wry>,
     model: MenuItem<tauri::Wry>,
+    /// The two local models, in `AsrModel` order.
+    model_choices: [CheckMenuItem<tauri::Wry>; 2],
     recent: [MenuItem<tauri::Wry>; 3],
     hud: Option<Hud>,
 }
@@ -45,6 +50,24 @@ impl TrayUi {
         let dictation =
             MenuItem::with_id(app, MENU_DICTATION, "Start dictation", true, None::<&str>)?;
         let model = MenuItem::with_id(app, MENU_MODEL, "Local model", false, None::<&str>)?;
+        let model_choices = [
+            CheckMenuItem::with_id(
+                app,
+                MENU_MODEL_MULTILINGUAL,
+                model_title(AsrModel::Multilingual, AppLanguage::Ru),
+                true,
+                true,
+                None::<&str>,
+            )?,
+            CheckMenuItem::with_id(
+                app,
+                MENU_MODEL_RU_EN_PUNCTUATED,
+                model_title(AsrModel::RuEnPunctuated, AppLanguage::Ru),
+                true,
+                false,
+                None::<&str>,
+            )?,
+        ];
         let recent = [
             MenuItem::with_id(app, "recent-0", "No recent dictations", false, None::<&str>)?,
             MenuItem::with_id(app, "recent-1", "", false, None::<&str>)?,
@@ -66,6 +89,8 @@ impl TrayUi {
                 &state,
                 &dictation,
                 &model,
+                &model_choices[0],
+                &model_choices[1],
                 &separator_1,
                 &recent[0],
                 &recent[1],
@@ -99,6 +124,7 @@ impl TrayUi {
             state,
             dictation,
             model,
+            model_choices,
             recent,
             hud,
         };
@@ -134,7 +160,22 @@ impl TrayUi {
         }
     }
 
-    pub fn set_model(&self, status: &ModelStatusDto, effective_mode: TranscriptionPreference) {
+    pub fn set_model(
+        &self,
+        status: &ModelStatusDto,
+        effective_mode: TranscriptionPreference,
+        model: AsrModel,
+        language: AppLanguage,
+    ) {
+        for (item, choice) in self
+            .model_choices
+            .iter()
+            .zip([AsrModel::Multilingual, AsrModel::RuEnPunctuated])
+        {
+            let _ = item.set_text(model_title(choice, language));
+            let _ = item.set_checked(choice == model);
+            let _ = item.set_enabled(effective_mode == TranscriptionPreference::Local);
+        }
         if effective_mode == TranscriptionPreference::Cloud {
             let _ = self.model.set_text("Transcription: Cloud");
             let _ = self.model.set_enabled(false);
@@ -177,6 +218,16 @@ impl TrayUi {
                 }
             }
         }
+    }
+}
+
+/// Model names as the macOS build words them; the tray has no room for the subtitle.
+fn model_title(model: AsrModel, language: AppLanguage) -> &'static str {
+    match (model, language) {
+        (AsrModel::Multilingual, AppLanguage::Ru) => "Русский, узбекский, казахский, кыргызский",
+        (AsrModel::Multilingual, AppLanguage::Uz) => "Rus, oʼzbek, qozoq, qirgʼiz",
+        (AsrModel::RuEnPunctuated, AppLanguage::Ru) => "Русский и английский",
+        (AsrModel::RuEnPunctuated, AppLanguage::Uz) => "Rus va ingliz",
     }
 }
 

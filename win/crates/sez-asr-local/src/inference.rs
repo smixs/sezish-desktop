@@ -1,4 +1,4 @@
-use crate::{chunker, stream::StreamTake, CtcDecoder, Vocab, VocabError};
+use crate::{chunker, stream::StreamTake, AsrModel, CtcDecoder, Vocab, VocabError};
 use ort::{session::Session, value::Tensor};
 use sez_core::{SezError, Transcriber};
 use std::{
@@ -27,7 +27,7 @@ pub enum LocalTranscriberError {
     /// ONNX Runtime failed to initialize, load a model, or run inference.
     #[error(transparent)]
     Ort(#[from] ort::Error),
-    /// The bundled token table could not be parsed.
+    /// The token table could not be read or parsed.
     #[error(transparent)]
     Vocab(#[from] VocabError),
     /// A model did not return an output required by the two-stage pipeline.
@@ -83,8 +83,13 @@ impl LocalTranscriber {
     ///
     /// Panics when called outside a Tokio runtime. The captured runtime handle
     /// is required for the synchronous, fire-and-forget [`Transcriber::warmup`].
-    pub fn new(model_path: impl AsRef<Path>) -> Result<Self, LocalTranscriberError> {
+    pub fn new(
+        model_path: impl AsRef<Path>,
+        vocab_path: impl AsRef<Path>,
+        model: AsrModel,
+    ) -> Result<Self, LocalTranscriberError> {
         let runtime = Handle::current();
+        let vocab = model.vocab(vocab_path.as_ref())?;
         ort::init().commit()?;
         let preprocessor = Session::builder()?.commit_from_memory(PREPROCESSOR)?;
         let acoustic_model = Session::builder()?.commit_from_file(model_path)?;
@@ -95,7 +100,7 @@ impl LocalTranscriber {
                     preprocessor,
                     acoustic_model,
                 }),
-                vocab: Vocab::bundled()?,
+                vocab,
                 inbox: Mutex::new(Vec::new()),
                 take: Mutex::new(StreamTake::new()),
                 draining: AtomicBool::new(false),

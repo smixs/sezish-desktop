@@ -15,12 +15,12 @@ use crate::settings::{
 use crate::tray::{TrayPhase, TrayUi};
 use async_trait::async_trait;
 use sez_asr_cloud::CloudTranscriber;
-use sez_asr_local::{LocalTranscriber, ModelDownloader, ModelStore};
+use sez_asr_local::{AsrModel, LocalTranscriber, ModelDownloader, ModelStore};
 use sez_audio::CpalMic;
 use sez_core::{Clock, Coordinator, History, HistoryEntry, SezError, State, Transcriber};
 use sez_history::FileHistory;
 use sez_hotkey::{Command, HotkeyMode, Shortcut};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex as SyncMutex, MutexGuard};
 use std::time::{Duration, Instant, UNIX_EPOCH};
@@ -113,7 +113,9 @@ pub struct AppController {
     settings_path: PathBuf,
     history_path: PathBuf,
     history: SharedHistory,
-    model_store: ModelStore,
+    /// The store of the model the settings currently point at. Swapped whole when
+    /// the user picks the other model; both bundles share one directory.
+    model_store: SyncMutex<ModelStore>,
     model_status: SyncMutex<ModelStatusDto>,
     model_idle: SyncMutex<ModelIdlePolicy>,
     clock: Arc<SystemClock>,
@@ -130,7 +132,7 @@ impl AppController {
         let history_path = data_root().join("DictationHistory");
         let settings = Settings::load(&settings_path);
         let history = SharedHistory::new(FileHistory::new(&history_path)?);
-        let model_store = ModelStore::new(None, None);
+        let model_store = ModelStore::for_model(settings.local_model, None);
         let model_status = if model_store.is_ready() {
             ModelStatusDto::Ready
         } else {
@@ -147,7 +149,7 @@ impl AppController {
             settings_path,
             history_path,
             history,
-            model_store,
+            model_store: SyncMutex::new(model_store),
             model_status: SyncMutex::new(model_status),
             model_idle: SyncMutex::new(ModelIdlePolicy::new(MODEL_IDLE_TIMEOUT)),
             clock: Arc::new(SystemClock::new()),
@@ -166,6 +168,10 @@ impl AppController {
         controller.refresh_tray().await;
         controller.start_model_idle_monitor();
         Ok(controller)
+    }
+
+    fn model_store(&self) -> ModelStore {
+        lock_recover(&self.model_store).clone()
     }
 
     pub fn is_recording(&self) -> bool {
@@ -346,6 +352,38 @@ impl AppController {
         self.settings().await
     }
 
+    /// Switching the model is switching engines: the coordinator is dropped and
+    /// rebuilt exactly the way a transcription-mode change does it, and the new
+    /// bundle is downloaded on demand from the same status UI.
+    pub async fn set_local_model(&self, model: AsrModel) -> Result<SettingsDto, AppError> {
+        {
+            let mut runtime = self.runtime.lock().await;
+            if runtime.settings.local_model != model {
+                runtime.settings.local_model = model;
+                runtime.settings.save(&self.settings_path)?;
+                let store = ModelStore::for_model(model, None);
+                let ready = store.is_ready();
+                *lock_recover(&self.model_store) = store;
+                self.set_model_status(if ready {
+                    ModelStatusDto::Ready
+                } else {
+                    ModelStatusDto::Missing
+                });
+                let idle = runtime
+                    .coordinator
+                    .as_ref()
+                    .is_none_or(|coordinator| coordinator.state() == State::Idle);
+                if idle {
+                    runtime.coordinator = None;
+                    runtime.coordinator_mode = None;
+                    self.rebuild_locked(&mut runtime, false)?;
+                }
+            }
+        }
+        self.refresh_model_menu().await;
+        self.settings().await
+    }
+
     pub async fn set_language(
         &self,
         language: Option<AppLanguage>,
@@ -397,7 +435,7 @@ impl AppController {
             ) {
                 return Ok(());
             }
-            if self.model_store.is_ready() {
+            if self.model_store().is_ready() {
                 *status = ModelStatusDto::Ready;
                 return Ok(());
             }
@@ -500,6 +538,7 @@ impl AppController {
             shortcut: settings.shortcut.clone(),
             transcription_mode: settings.transcription_mode,
             effective_transcription_mode: effective,
+            local_model: settings.local_model,
             language: settings.language,
             resolved_language: resolved,
             play_sounds: settings.play_sounds,
@@ -529,7 +568,7 @@ impl AppController {
                     credentials.key.clone(),
                 ))
             }
-            TranscriptionPreference::Local if !self.model_store.is_ready() => {
+            TranscriptionPreference::Local if !self.model_store().is_ready() => {
                 runtime.coordinator = None;
                 runtime.coordinator_mode = None;
                 self.set_model_status(ModelStatusDto::Missing);
@@ -541,23 +580,19 @@ impl AppController {
                 return Ok(());
             }
             TranscriptionPreference::Local => {
-                let model_path = self
-                    .model_store
-                    .files
-                    .iter()
-                    .find(|file| {
-                        Path::new(&file.name)
-                            .extension()
-                            .is_some_and(|ext| ext == "onnx")
-                    })
-                    .map(|file| self.model_store.local_path(file))
-                    .ok_or_else(|| AppError::not_ready("local model file is unavailable"))?;
+                let model = runtime.settings.local_model;
+                let store = self.model_store();
+                let (Some(model_path), Some(vocab_path)) = (store.onnx_path(), store.vocab_path())
+                else {
+                    return Err(AppError::not_ready("local model file is unavailable"));
+                };
                 let load_started = Instant::now();
-                match LocalTranscriber::new(model_path) {
+                match LocalTranscriber::new(model_path, vocab_path, model) {
                     Ok(transcriber) => {
                         crate::obs::log(&format!(
-                            "model load ok in {}ms",
-                            load_started.elapsed().as_millis()
+                            "model load ok in {}ms ({})",
+                            load_started.elapsed().as_millis(),
+                            model.as_str()
                         ));
                         self.set_model_status(ModelStatusDto::Ready);
                         lock_recover(&self.model_idle).on_loaded();
@@ -713,8 +748,8 @@ impl AppController {
     }
 
     async fn run_model_download(&self) -> Result<(), String> {
-        let files = self
-            .model_store
+        let store = self.model_store();
+        let files = store
             .missing_files()
             .into_iter()
             .cloned()
@@ -724,7 +759,7 @@ impl AppController {
         let downloader = ModelDownloader::new();
         for file in files {
             downloader
-                .download(&file, &self.model_store)
+                .download(&file, &store)
                 .await
                 .map_err(|error| error.to_string())?;
             completed = completed.saturating_add(file.size);
@@ -733,7 +768,7 @@ impl AppController {
             });
             self.refresh_model_menu().await;
         }
-        if self.model_store.is_ready() {
+        if store.is_ready() {
             Ok(())
         } else {
             Err("Model download did not complete every required file.".to_owned())
@@ -765,15 +800,22 @@ impl AppController {
     }
 
     async fn refresh_model_menu(&self) {
-        let effective = {
+        let (effective, model, language) = {
             let runtime = self.runtime.lock().await;
-            effective_transcription_mode(
-                runtime.settings.transcription_mode,
-                self.cloud_credentials.is_some(),
+            (
+                effective_transcription_mode(
+                    runtime.settings.transcription_mode,
+                    self.cloud_credentials.is_some(),
+                ),
+                runtime.settings.local_model,
+                runtime
+                    .settings
+                    .language
+                    .unwrap_or_else(|| resolve_system_language(&system_locale())),
             )
         };
         self.tray
-            .set_model(&self.model_download_status(), effective);
+            .set_model(&self.model_download_status(), effective, model, language);
     }
 
     fn refresh_model_menu_without_wait(self: &Arc<Self>) {

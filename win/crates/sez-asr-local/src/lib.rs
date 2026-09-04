@@ -33,4 +33,4 @@ pub use ctc::{CtcDecoder, Vocab, VocabError};
 pub use downloader::{ModelDownloadError, ModelDownloader};
 #[cfg(feature = "local-inference")]
 pub use inference::{LocalTranscriber, LocalTranscriberError};
-pub use model_store::{ModelFile, ModelStore};
+pub use model_store::{AsrModel, ModelFile, ModelStore};

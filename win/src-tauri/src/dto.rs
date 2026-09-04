@@ -1,5 +1,6 @@
 use crate::settings::{AppLanguage, HotkeyPreference, TranscriptionPreference};
 use serde::Serialize;
+use sez_asr_local::AsrModel;
 use sez_hotkey::Shortcut;
 
 #[derive(Clone, Debug, Serialize)]
@@ -8,6 +9,7 @@ pub struct SettingsDto {
     pub shortcut: Shortcut,
     pub transcription_mode: TranscriptionPreference,
     pub effective_transcription_mode: TranscriptionPreference,
+    pub local_model: AsrModel,
     pub language: Option<AppLanguage>,
     pub resolved_language: AppLanguage,
     pub play_sounds: bool,
