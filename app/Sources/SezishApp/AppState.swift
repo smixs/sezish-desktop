@@ -144,6 +144,10 @@ final class AppState {
     @ObservationIgnored var meetingDetector: MeetingDetector?
     /// Auto-stop applies only to auto-started recordings; manual ones end manually.
     @ObservationIgnored var meetingWasAutoStarted = false
+    /// The app the system stem is scoped to, decided once when the meeting starts:
+    /// nil means no call app was identifiable and the tap recorded everything.
+    /// Read by the mic device (A4) and the file name (A7); cleared in `finishMeeting`.
+    @ObservationIgnored var meetingCallApp: MeetingCallApp?
     /// Fed by the mic tap during dictation; drives the overlay's wave.
     @ObservationIgnored let levelMeter = AudioLevelMeter()
     @ObservationIgnored private var shortcutMonitor: ShortcutMonitor?

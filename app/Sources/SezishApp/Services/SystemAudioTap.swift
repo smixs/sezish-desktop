@@ -1,8 +1,10 @@
-@preconcurrency import AVFoundation
+import AVFoundation
 import AudioToolbox
 import Foundation
+import SezishCore
 
-// Captures the global system-audio mixdown via a Core Audio process tap.
+// Captures system audio via a Core Audio process tap: the call app's own
+// processes when one is known, the global mixdown otherwise.
 // Adapted from insidegui/AudioCap (https://github.com/insidegui/AudioCap,
 // BSD-2-Clause license). The first `start()` triggers the system's
 // "System Audio Recording" TCC prompt (usage string is in Info.plist).
@@ -44,8 +46,8 @@ nonisolated final class SystemAudioTap: @unchecked Sendable {
         self.onSamples16k = onSamples16k
     }
 
-    func start() throws {
-        try queue.sync { try startOnQueue() }
+    func start(coverage: TapCoverage) throws {
+        try queue.sync { try startOnQueue(coverage: coverage) }
     }
 
     func stop() {
@@ -54,11 +56,11 @@ nonisolated final class SystemAudioTap: @unchecked Sendable {
 
     // MARK: - On queue
 
-    private func startOnQueue() throws {
+    private func startOnQueue(coverage: TapCoverage) throws {
         guard !running else { return }
 
-        // 1. Global mono mixdown tap over every process (TCC prompt on first use).
-        let description = CATapDescription(monoGlobalTapButExcludeProcesses: [])
+        // 1. Mono mixdown tap over what the start decided (TCC prompt on first use).
+        let description = makeTapDescription(for: coverage)
         description.uuid = UUID()
         description.muteBehavior = .unmuted
         description.isPrivate = true
@@ -68,22 +70,10 @@ nonisolated final class SystemAudioTap: @unchecked Sendable {
         tapID = newTapID
         tapUUID = description.uuid
 
-        // 2. Converter from the tap's native format to 16 kHz mono.
-        var streamDescription = try tapID.readTapStreamDescription()
-        guard let format = AVAudioFormat(streamDescription: &streamDescription),
-              let output = AVAudioFormat(
-                  commonFormat: .pcmFormatFloat32, sampleRate: 16_000, channels: 1, interleaved: false
-              ),
-              let converter = AVAudioConverter(from: format, to: output)
-        else {
-            stopOnQueue()
-            throw SystemAudioTapError.formatUnavailable
-        }
-        tapFormat = format
-        outputFormat = output
-        self.converter = converter
-
+        // 2+3. Converter for the tap's native format, then the aggregate that
+        //      hosts the tap. Any failure here has to tear the tap down again.
         do {
+            try makeConverter()
             try buildAggregateAndStart()
         } catch {
             stopOnQueue()
@@ -92,6 +82,34 @@ nonisolated final class SystemAudioTap: @unchecked Sendable {
 
         installDeviceChangeListener()
         running = true
+    }
+
+    /// The tap's native format and the 16 kHz mono converter built from it,
+    /// stored on the object for the IOProc.
+    private func makeConverter() throws {
+        var streamDescription = try tapID.readTapStreamDescription()
+        guard let format = AVAudioFormat(streamDescription: &streamDescription),
+            let output = AVAudioFormat(
+                commonFormat: .pcmFormatFloat32, sampleRate: 16_000, channels: 1, interleaved: false
+            ),
+            let converter = AVAudioConverter(from: format, to: output)
+        else {
+            throw SystemAudioTapError.formatUnavailable
+        }
+        tapFormat = format
+        outputFormat = output
+        self.converter = converter
+    }
+
+    /// The one CoreAudio description that can express a coverage — which coverage
+    /// that is was decided in `SezishCore` (`MeetingAudioScope.coverage`). One
+    /// description per recording: a device change rebuilds only the aggregate that
+    /// hosts this tap, so the coverage survives it by construction.
+    private func makeTapDescription(for coverage: TapCoverage) -> CATapDescription {
+        guard case .processes(let ids) = coverage else {
+            return CATapDescription(monoGlobalTapButExcludeProcesses: [])
+        }
+        return CATapDescription(monoMixdownOfProcesses: ids)
     }
 
     private func stopOnQueue() {
