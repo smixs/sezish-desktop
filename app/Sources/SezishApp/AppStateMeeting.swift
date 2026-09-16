@@ -24,12 +24,11 @@ extension AppState {
             guard let self, self.autoRecordMeetings, self.status == .idle else { return }
             self.startMeetingRecording(source: .auto(bundleID: bundleID))
         }
-        detector.onMeetingEnd = { [weak self] in
+        detector.onMeetingEnd = { [weak self] quietWindow in
             guard let self, self.meetingWasAutoStarted else { return }
-            // The detector waited out the debounce's stop window before calling
-            // this: that silence is not meeting time either.
-            self.meetingStopReason = .callEnded(MeetingDebounce.defaultStopAfter)
-            self.stopMeetingRecording()
+            // The detector waited the debounce's stop window out before calling
+            // this, so it hands that window over: it is not meeting time either.
+            self.stopMeetingRecording(reason: .callEnded(quietWindow))
         }
         detector.onStatus = { [weak self] facts in
             self?.meetingDetectorFacts = facts
@@ -105,7 +104,7 @@ extension AppState {
             startDate: startDate ?? Date(),
             auto: auto,
             strings: strings,
-            onStop: { [weak self] in self?.stopMeetingRecording() },
+            onStop: { [weak self] in self?.stopMeetingRecording(reason: .manual) },
             onHide: { [weak self] in self?.recordingPanel.hide() }
         )
     }
@@ -135,9 +134,8 @@ extension AppState {
                 micLoud: loudness.mic, systemLoud: loudness.system, at: now
             )
         else { return }
-        meetingStopReason = reason
         notifyMeetingStopped(reason)
-        stopMeetingRecording()
+        stopMeetingRecording(reason: reason)
     }
 
     /// The app ended this recording on its own, so it owes the user a reason. A
@@ -435,6 +433,12 @@ extension AppState {
     }
 
     func stopMeetingRecording() {
+
+    /// Ends the recording in flight with the reason it ended — a parameter, not a
+    /// field: a stop that arrives while the take is being mixed down can no longer
+    /// rewrite what ended the one before it, and the compiler makes every stopper
+    /// say why.
+    func stopMeetingRecording(reason: MeetingStopReason) {
         guard status == .recordingMeeting else { return }
         // The nets die with the recording — a stop is a stop, whoever asked for it,
         // and the poll must not fire again while the take is being mixed down.
@@ -443,21 +447,20 @@ extension AppState {
         meetingStopPoll = nil
         recordingPanel.hide()
         status = .processingMeeting
-        Task { await self.finishMeeting() }
+        Task { await self.finishMeeting(reason: reason) }
     }
 
-    private func finishMeeting() async {
+    private func finishMeeting(reason: MeetingStopReason) async {
         defer {
             status = .idle
             meetingStartDate = nil
             meetingWasAutoStarted = false
             meetingCallApp = nil
             meetingTranscription = nil
-            meetingStopReason = .manual
         }
         do {
             let capture = try await meetingRecorder.stop()
-            await runMeetingPipeline(capture)
+            await runMeetingPipeline(capture, stopReason: reason)
         } catch {
             meetingTranscription?.cancel()
             notifier.notify(title: "sezish", body: strings.notifMeetingFailed)
@@ -466,7 +469,9 @@ extension AppState {
 
     /// Audio lands on disk FIRST (the take must survive any transcription
     /// failure), then the transcript .md joins it.
-    private func runMeetingPipeline(_ capture: MeetingRecorder.Capture) async {
+    private func runMeetingPipeline(
+        _ capture: MeetingRecorder.Capture, stopReason: MeetingStopReason
+    ) async {
         let dir = MeetingRecorder.meetingsDirectory
         let startedAt = meetingStartDate ?? Date().addingTimeInterval(-capture.duration)
         // The file name reads where the call was: the same call app the system
@@ -497,7 +502,7 @@ extension AppState {
         // out is not meeting time, so it comes off the duration first.
         guard
             MeetingTranscriptionRule.shouldTranscribe(
-                duration: capture.duration, stopReason: meetingStopReason
+                duration: capture.duration, stopReason: stopReason
             )
         else {
             meetingTranscription?.cancel()

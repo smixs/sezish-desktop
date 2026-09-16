@@ -153,9 +153,6 @@ final class AppState {
     @ObservationIgnored var meetingAutoStop: MeetingAutoStop?
     /// The 1 Hz poll that feeds them — alive only while a meeting is recorded.
     @ObservationIgnored var meetingStopPoll: Timer?
-    /// What ended the last recording: the short-recording rule discounts the
-    /// trailing silence an automatic stop implies.
-    @ObservationIgnored var meetingStopReason: MeetingStopReason = .manual
     /// Fed by the mic tap during dictation; drives the overlay's wave.
     @ObservationIgnored let levelMeter = AudioLevelMeter()
     @ObservationIgnored private var shortcutMonitor: ShortcutMonitor?
@@ -261,7 +258,7 @@ final class AppState {
 
     func toggleMeetingRecording() {
         switch status {
-        case .recordingMeeting: stopMeetingRecording()
+        case .recordingMeeting: stopMeetingRecording(reason: .manual)
         case .idle: startMeetingRecording(source: .manual)
         case .processingMeeting: break
         }

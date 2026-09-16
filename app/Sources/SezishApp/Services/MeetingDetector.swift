@@ -14,7 +14,10 @@ import SezishCore
 @MainActor
 final class MeetingDetector {
     var onMeetingStart: ((_ bundleID: String?) -> Void)?
-    var onMeetingEnd: (() -> Void)?
+    /// Carries the window the detector waited out (`MeetingDebounce.stopAfter`):
+    /// that silence is not meeting time, and the caller that judges the recording
+    /// must not assume a default the detector may not share.
+    var onMeetingEnd: ((_ quietWindow: TimeInterval) -> Void)?
     /// Fires after every tick with what the detector thinks right now; AppState
     /// mirrors it into the one-line "why not recording" menu hint.
     /// That tick's facts; AppState stores them and rebuilds the decision at
@@ -46,6 +49,16 @@ final class MeetingDetector {
     func stop() {
         poll?.invalidate()
         poll = nil
+        rearm()
+    }
+
+    /// Forget the session: the debounce back to idle and no sticky output. The
+    /// app calls this after a stop of its own (the silence net), because a call app
+    /// that keeps the mic open would otherwise leave the debounce `.active` and the
+    /// next call in that app would never start a recording. Only safe because a
+    /// silence-stopped take with no meeting in it is deleted whole: the loop
+    /// "record, go quiet, stop" cannot pile up orphans.
+    func rearm() {
         debounce.reset()
         seenOutput.removeAll()
     }
@@ -86,7 +99,7 @@ final class MeetingDetector {
             return
         }
         seenOutput.removeAll()
-        onMeetingEnd?()
+        onMeetingEnd?(debounce.stopAfter)
     }
 
     private func noteSilence(holdersEmpty: Bool) {

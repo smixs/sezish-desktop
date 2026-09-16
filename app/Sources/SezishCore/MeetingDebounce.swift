@@ -19,12 +19,17 @@ public struct MeetingDebounce: Sendable {
 
     private var state: State = .idle
     private let startAfter: TimeInterval
-    private let stopAfter: TimeInterval
 
     /// Defaults, exposed because the short-recording rule discounts the same stop
     /// window the detector waited out before it called the call ended.
     public static let defaultStartAfter: TimeInterval = 2
     public static let defaultStopAfter: TimeInterval = 10
+
+    /// The window a call must stay gone before the detector calls it over. Public
+    /// because that stretch of the recording is not meeting time either: the stop
+    /// it produces carries it as `MeetingStopReason.callEnded`, and the detector
+    /// hands its own window over rather than letting the app assume a default.
+    public let stopAfter: TimeInterval
 
     public init(
         startAfter: TimeInterval = Self.defaultStartAfter,
@@ -94,5 +99,16 @@ public enum MeetingTranscriptionRule {
         duration: TimeInterval, stopReason: MeetingStopReason
     ) -> Bool {
         duration - stopReason.trailingSilence >= minimumSeconds
+    }
+
+    /// True when the take leaves nothing at all behind: no audio, no transcript,
+    /// no banner. That is the silence net firing on a recording with no meeting in
+    /// it — an app that holds the mic open would otherwise leave one orphan .m4a
+    /// per round of "record, go quiet, stop", and nobody ever saw those takes.
+    /// Every other short recording keeps its audio: those seconds are the user's.
+    public static func discardsAudio(
+        duration: TimeInterval, stopReason: MeetingStopReason
+    ) -> Bool {
+        false
     }
 }

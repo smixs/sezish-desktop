@@ -122,6 +122,44 @@ struct MeetingTranscriptionRuleTests {
         #expect(MeetingTranscriptionRule.shouldTranscribe(duration: 60, stopReason: .manual))
         #expect(MeetingTranscriptionRule.shouldTranscribe(duration: 60, stopReason: .ceiling(18_000)))
     }
+
+    /// An app that holds the mic open after a call makes the silence net fire over
+    /// and over: a take it ended, with no meeting in it (the window it waited out
+    /// is not meeting time), must leave nothing at all — no audio, no .md, no banner.
+    @Test func aSilenceStoppedTakeWithNoMeetingIsThrownAway() {
+        #expect(MeetingTranscriptionRule.discardsAudio(duration: 630, stopReason: .silence(600)))
+        #expect(!MeetingTranscriptionRule.discardsAudio(duration: 660, stopReason: .silence(600)))
+    }
+
+    /// Every other short take keeps its audio — the user asked for those seconds,
+    /// and a voice message nobody transcribed is still a voice message.
+    @Test func shortTakesEndedAnyOtherWayKeepTheirAudio() {
+        #expect(!MeetingTranscriptionRule.discardsAudio(duration: 30, stopReason: .manual))
+        #expect(!MeetingTranscriptionRule.discardsAudio(duration: 30, stopReason: .ceiling(18_000)))
+        #expect(!MeetingTranscriptionRule.discardsAudio(duration: 30, stopReason: .callEnded(10)))
+    }
+}
+
+struct MeetingStopBannerTests {
+    /// The silence banner speaks the unit the hidden setting uses, and names the
+    /// only stop the detector has to re-arm after.
+    @Test func theSilenceBannerIsInMinutes() {
+        #expect(MeetingStopReason.silence(600).banner == .silence(minutes: 10))
+        #expect(MeetingStopReason.silence(600).isSilenceStop)
+        #expect(!MeetingStopReason.ceiling(18_000).isSilenceStop)
+    }
+
+    /// A hand-tuned ceiling is never rounded to whole hours — the setting is in
+    /// minutes, so 90 of them are "1 ч 30 мин" — and a part that is zero is dropped
+    /// rather than printed: the default five hours is "5 ч", not "5 ч 0 мин".
+    @Test func theCeilingBannerKeepsItsMinutes() {
+        #expect(MeetingStopReason.ceiling(5_400).banner == .ceiling(hours: 1, minutes: 30))
+        #expect(MeetingStopReason.ceiling(5_400).banner != .ceiling(hours: 1, minutes: nil))
+        #expect(MeetingStopReason.ceiling(18_000).banner == .ceiling(hours: 5, minutes: nil))
+        #expect(MeetingStopReason.ceiling(1_800).banner == .ceiling(hours: nil, minutes: 30))
+        #expect(MeetingStopReason.manual.banner == nil)
+        #expect(MeetingStopReason.callEnded(10).banner == nil)
+    }
 }
 
 struct MeetingAutoStopTests {
@@ -200,6 +238,18 @@ struct MeetingLoudnessMeterTests {
         #expect(!half)
         let secondHalf = meter.append(Array(loud[800...]))
         #expect(secondHalf)
+    }
+
+    /// The recorder lives as long as the app, so a take must not judge the next
+    /// one: the half-counted frame is dropped when the recording ends.
+    @Test func aResetMeterForgetsItsHalfCountedFrame() {
+        var meter = MeetingLoudnessMeter()
+        _ = meter.append(Array(loud[..<800]))
+        meter.reset()
+        let stale = meter.append(Array(roomTone[..<800]))
+        let fresh = meter.append(Array(loud[800...]))
+        #expect(!stale)
+        #expect(fresh)
     }
 }
 

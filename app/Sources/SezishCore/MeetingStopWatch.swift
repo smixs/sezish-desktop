@@ -22,6 +22,30 @@ public enum MeetingStopReason: Equatable, Sendable {
         case .ceiling, .manual: 0
         }
     }
+
+    /// True for the stop the silence net causes — the only one the detector has to
+    /// be re-armed after, and the only one that may throw a take away.
+    public var isSilenceStop: Bool {
+        false
+    }
+
+    /// The units of the "the recording stopped itself" banner, or nil for the
+    /// stops that need no announcement (the user's own, and the detector's).
+    public var banner: MeetingStopBanner? {
+        nil
+    }
+}
+
+/// What the user is told about a stop they did not ask for, in parts the app can
+/// format without deciding anything: a 90-minute ceiling is "1 ч 30 мин", never a
+/// rounded "1 ч".
+public enum MeetingStopBanner: Equatable, Sendable {
+    /// Minutes of both-track silence that ended an auto-started recording.
+    case silence(minutes: Int)
+    /// The ceiling, zero parts dropped: `(hours: 5, minutes: nil)` is "5 ч",
+    /// `(hours: 1, minutes: 30)` is "1 ч 30 мин", `(hours: nil, minutes: 30)` is
+    /// "30 мин". Exactly one part is nil only when the other covers it whole.
+    case ceiling(hours: Int?, minutes: Int?)
 }
 
 /// The two safety nets that end a recording nobody is watching: a call app can
@@ -114,4 +138,8 @@ public struct MeetingLoudnessMeter: Sendable {
         }
         return loud
     }
+
+    /// Forget the half-counted frame: the next take's first samples are its own,
+    /// not the tail of a recording that ended minutes ago.
+    public mutating func reset() {}
 }
