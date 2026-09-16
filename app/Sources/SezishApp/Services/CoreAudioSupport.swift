@@ -2,6 +2,12 @@ import AppKit
 import AudioToolbox
 import Foundation
 import SezishCore
+import os
+
+/// One line per meeting start about the mic: which input it follows and why, plus every
+/// input that could not be read. Same subsystem and predicate as every other log.
+/// `nonisolated` because the input reading runs off the main actor.
+nonisolated let micRouteLog = Logger(subsystem: "com.smixs.sezish", category: "mic-route")
 
 // Minimal CoreAudio property helpers for the process tap, the meeting detector
 // and the mic route.
@@ -19,21 +25,7 @@ extension AudioObjectID {
 
     /// `kAudioHardwarePropertyProcessObjectList` on the system object.
     nonisolated static func readProcessList() throws -> [AudioObjectID] {
-        var address = AudioObjectPropertyAddress(
-            mSelector: kAudioHardwarePropertyProcessObjectList,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        var dataSize: UInt32 = 0
-        var err = AudioObjectGetPropertyDataSize(.system, &address, 0, nil, &dataSize)
-        guard err == noErr else { throw CoreAudioError(message: "process list size failed: \(err)") }
-        var value = [AudioObjectID](
-            repeating: kAudioObjectUnknown,
-            count: Int(dataSize) / MemoryLayout<AudioObjectID>.size
-        )
-        err = AudioObjectGetPropertyData(.system, &address, 0, nil, &dataSize, &value)
-        guard err == noErr else { throw CoreAudioError(message: "process list read failed: \(err)") }
-        return value
+        try AudioObjectID.system.readIDs(kAudioHardwarePropertyProcessObjectList, scope: kAudioObjectPropertyScopeGlobal)
     }
 
     /// The device regular audio plays through (not the alerts device).
@@ -41,6 +33,63 @@ extension AudioObjectID {
         try AudioObjectID.system.read(
             kAudioHardwarePropertyDefaultOutputDevice, defaultValue: AudioDeviceID(kAudioObjectUnknown)
         )
+    }
+
+    /// `kAudioProcessPropertyDevices` in the input scope: the devices this process
+    /// listens to, which is not necessarily the system's default input — that
+    /// difference is the whole point of asking.
+    nonisolated func readProcessInputDevices() throws -> [AudioDeviceID] {
+        try readIDs(kAudioProcessPropertyDevices, scope: kAudioObjectPropertyScopeInput)
+    }
+
+    /// True when the device exposes at least one input channel: a call app holds
+    /// output devices too, and those are not microphones.
+    nonisolated func readHasInputChannels() throws -> Bool {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyStreamConfiguration,
+            mScope: kAudioObjectPropertyScopeInput,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var size: UInt32 = 0
+        var err = AudioObjectGetPropertyDataSize(self, &address, 0, nil, &size)
+        guard err == noErr else {
+            throw CoreAudioError(message: "input configuration size failed: \(err)")
+        }
+        // The API writes a whole AudioBufferList, whose header is what the
+        // channel count is read from: never allocate less than one.
+        let bytes = Swift.max(Int(size), MemoryLayout<AudioBufferList>.size)
+        let list = UnsafeMutableRawPointer.allocate(
+            byteCount: bytes, alignment: MemoryLayout<AudioBufferList>.alignment
+        )
+        defer { list.deallocate() }
+        err = AudioObjectGetPropertyData(self, &address, 0, nil, &size, list)
+        guard err == noErr else {
+            throw CoreAudioError(message: "input configuration read failed: \(err)")
+        }
+        let buffers = UnsafeMutableAudioBufferListPointer(
+            list.assumingMemoryBound(to: AudioBufferList.self)
+        )
+        return buffers.contains { $0.mNumberChannels > 0 }
+    }
+
+    /// This device as a route candidate: the id CoreAudio opens it by, the name the
+    /// user sees in System Settings, and whether it is real hardware at all.
+    nonisolated func readMicDevice() throws -> MicDevice {
+        MicDevice(id: self, name: try readDeviceName(), isVirtual: try readIsVirtual())
+    }
+
+    /// A device that is not hardware: Zoom's own loopback, an aggregate, a virtual
+    /// cable. They answer in the input scope and pass the input-channel filter, and
+    /// then hand the engine zero frames — a mic track that is silence is as wrong as
+    /// one that recorded the room.
+    nonisolated func readIsVirtual() throws -> Bool {
+        let transport = try read(kAudioDevicePropertyTransportType, defaultValue: UInt32(0))
+        return transport == kAudioDeviceTransportTypeVirtual
+            || transport == kAudioDeviceTransportTypeAggregate
+    }
+
+    nonisolated func readDeviceName() throws -> String {
+        try readString(kAudioObjectPropertyName)
     }
 
     nonisolated func readDeviceUID() throws -> String {
@@ -97,6 +146,84 @@ extension AudioObjectID {
 
     nonisolated func readString(_ selector: AudioObjectPropertySelector) throws -> String {
         try read(selector, defaultValue: "" as CFString) as String
+    }
+
+    /// An array-valued property in a given scope, as raw ids — `AudioObjectID`,
+    /// `AudioDeviceID` and `AudioStreamID` are all `UInt32`. `read` is
+    /// global-scope only, which is what every other caller here wants.
+    nonisolated func readIDs(
+        _ selector: AudioObjectPropertySelector, scope: AudioObjectPropertyScope
+    ) throws -> [AudioObjectID] {
+        var address = AudioObjectPropertyAddress(
+            mSelector: selector,
+            mScope: scope,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var dataSize: UInt32 = 0
+        var err = AudioObjectGetPropertyDataSize(self, &address, 0, nil, &dataSize)
+        guard err == noErr else {
+            throw CoreAudioError(message: "property \(selector) size failed: \(err)")
+        }
+        var value = [AudioObjectID](
+            repeating: kAudioObjectUnknown,
+            count: Int(dataSize) / MemoryLayout<AudioObjectID>.size
+        )
+        err = AudioObjectGetPropertyData(self, &address, 0, nil, &dataSize, &value)
+        guard err == noErr else {
+            throw CoreAudioError(message: "property \(selector) read failed: \(err)")
+        }
+        // The call reports what it actually wrote: the property can shrink between the
+        // size query and the read, and the tail would still hold `kAudioObjectUnknown`
+        // (object #0) — an id that throws on every read it is passed to.
+        return Array(value.prefix(Int(dataSize) / MemoryLayout<AudioObjectID>.size))
+    }
+}
+
+/// Where a meeting's mic comes from: the device the call app listens to, which is
+/// the reason process devices are read at all.
+extension MeetingCallApp {
+    /// Every microphone this app's family holds, in discovery order and without
+    /// duplicates — several helpers normally share one device. The family's processes
+    /// come from the snapshot the start already read: a second read a moment later can
+    /// name a process the first never saw.
+    nonisolated func inputDevices(in snapshot: AudioProcessSnapshot) -> [MicDevice] {
+        var unique: [MicDevice] = []
+        var seen: Set<UInt32> = []
+        for device in snapshot.inputProcessIDs(of: .family(family)).flatMap(readDevices) {
+            guard seen.insert(device.id).inserted else { continue }
+            unique.append(device)
+        }
+        return unique
+    }
+
+    /// The devices of one process. Read on its own: a helper of the family that holds
+    /// no audio, or a device that disappeared between the listing and the read, must
+    /// cost the meeting that one entry — not every device of the app (an empty list is
+    /// indistinguishable from "the app listens to nothing", and that answer records
+    /// the room, which is the defect this route exists for).
+    private nonisolated func readDevices(of process: AudioObjectID) -> [MicDevice] {
+        do {
+            return try process.readProcessInputDevices().compactMap(readDevice)
+        } catch {
+            micRouteLog.error(
+                "input devices of process \(process, privacy: .public) unreadable: \(error.localizedDescription, privacy: .public)"
+            )
+            return []
+        }
+    }
+
+    /// One device: without input channels it is not a microphone at all (a call app
+    /// holds its outputs too), and one that cannot be read is skipped with its cause.
+    private nonisolated func readDevice(_ device: AudioDeviceID) -> MicDevice? {
+        do {
+            guard try device.readHasInputChannels() else { return nil }
+            return try device.readMicDevice()
+        } catch {
+            micRouteLog.error(
+                "device \(device, privacy: .public) unreadable: \(error.localizedDescription, privacy: .public)"
+            )
+            return nil
+        }
     }
 }
 
@@ -156,16 +283,24 @@ struct AudioProcessSnapshot: Sendable {
     }
 }
 
-/// The CoreAudio objects behind a scope: an adapter over the pure decision
-/// `coverage(live:)`, which is where "what do we tap" is answered.
-extension MeetingAudioScope {
-    /// The objects this scope covers. `.all` has no list to begin with, and a family
-    /// with nothing live is an empty one — both mean "the whole system" to a caller
-    /// that asked for objects rather than for a coverage.
-    nonisolated func liveProcessIDs() throws -> [AudioObjectID] {
-        switch coverage(live: try AudioProcessSnapshot.read().tapCandidates) {
+/// The CoreAudio objects behind one scope, unpacked from a snapshot the caller
+/// already has: `coverage(live:)` in `SezishCore` decides, this only translates.
+extension AudioProcessSnapshot {
+    /// The objects of a named family — an empty list for `.all`, which has no list to
+    /// begin with, and for a family with nothing live. Reading the objects is the
+    /// only reason to hold a snapshot at all; the tap gets a `TapCoverage` instead.
+    nonisolated func processIDs(of scope: MeetingAudioScope) -> [AudioObjectID] {
+        switch scope.coverage(live: tapCandidates) {
         case .global: return []
         case .processes(let ids): return ids
         }
+    }
+
+    /// The family's objects that are actually on the mic. A helper that holds no input
+    /// has nothing to read — asking it anyway is one throw away from losing every
+    /// device of the family — so the snapshot's own flag decides who is asked.
+    nonisolated func inputProcessIDs(of scope: MeetingAudioScope) -> [AudioObjectID] {
+        let holdingInput = Set(processes.filter(\.isRunningInput).map(\.id))
+        return processIDs(of: scope).filter { holdingInput.contains($0) }
     }
 }

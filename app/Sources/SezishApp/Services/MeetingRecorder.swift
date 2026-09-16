@@ -1,3 +1,4 @@
+import AudioToolbox
 import Foundation
 import SezishCore
 
@@ -6,6 +7,23 @@ import SezishCore
 /// both spooled to disk, mixed to one mono track on stop.
 @MainActor
 final class MeetingRecorder {
+    /// Builds this recording's microphone. Injectable because the device id handed over
+    /// here is the whole mic route, and nothing else in the app can see what reached it.
+    typealias MicFactory = (AudioDeviceID?, @escaping @Sendable ([Float]) -> Void) -> MicCapture
+
+    private let makeMic: MicFactory
+
+    init(makeMic: @escaping MicFactory = MeetingRecorder.engineMic) {
+        self.makeMic = makeMic
+    }
+
+    /// The real mic: a fresh `AVAudioEngine`, pinned to `deviceID` before the format is
+    /// read and the tap installed. nil is the engine's own default — dictation's way.
+    nonisolated static func engineMic(
+        deviceID: AudioDeviceID?, onSamples16k: @escaping @Sendable ([Float]) -> Void
+    ) -> MicCapture {
+        MicRecorder(deviceID: deviceID, onSamples16k: onSamples16k)
+    }
     enum StartOutcome {
         case full
         /// System-audio tap failed (typically TCC denied): recording continues
@@ -24,7 +42,7 @@ final class MeetingRecorder {
         case notRecording
     }
 
-    private var mic: MicRecorder?
+    private var mic: (any MicCapture)?
     private var tap: SystemAudioTap?
     private var micStem: MeetingStem?
     private var systemStem: MeetingStem?
@@ -43,10 +61,13 @@ final class MeetingRecorder {
 
     /// `pipeline` (optional) gets the same sample streams the stems spool, for
     /// incremental transcription while the recording is still running. `coverage`
-    /// decides whose audio the system stem holds: the call app's own processes, or
-    /// everything that plays when no app could be named.
+    /// decides whose audio the system stem holds — the call app's own processes, or
+    /// everything that plays when no app could be named (decided in `SezishCore`).
+    /// `device` pins the microphone to the input the call app listens to; nil leaves
+    /// the engine on the system default, exactly as dictation records.
     func start(
-        coverage: TapCoverage, pipeline: MeetingTranscriptionPipeline? = nil
+        coverage: TapCoverage, device: AudioDeviceID?,
+        pipeline: MeetingTranscriptionPipeline? = nil
     ) throws -> StartOutcome {
         guard !isRecording else { return .full }
 
@@ -62,10 +83,10 @@ final class MeetingRecorder {
         )
 
         // Mic first: the user's own voice is the non-negotiable half.
-        let mic = MicRecorder(onSamples16k: {
+        let mic = makeMic(device) {
             micStem.ingest($0)
             pipeline?.ingestMic($0)
-        })
+        }
         do {
             try mic.start()
         } catch {
