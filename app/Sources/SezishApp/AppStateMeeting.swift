@@ -439,8 +439,6 @@ extension AppState {
         micRouteLog.notice("meeting mic: \(device.name, privacy: .public) (call app)")
     }
 
-    func stopMeetingRecording() {
-
     /// Ends the recording in flight with the reason it ended — a parameter, not a
     /// field: a stop that arrives while the take is being mixed down can no longer
     /// rewrite what ended the one before it, and the compiler makes every stopper
