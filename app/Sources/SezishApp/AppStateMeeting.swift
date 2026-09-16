@@ -310,13 +310,17 @@ extension AppState {
     }
 
     /// The pure decision lives in `SezishCore`; the snapshot supplies the mic
-    /// holders and the detector supplies the app it saw.
+    /// holders and the detector supplies the app it saw. The display name is
+    /// snapshotted here, once, while the process is known alive — a pid read
+    /// after the recording may be dead or handed to another app by then.
     private func resolveMeetingCallApp(
         source: MeetingStartSource, snapshot: AudioProcessSnapshot
     ) -> MeetingCallApp? {
         MeetingCallAppResolver.resolve(
             source: source, holders: snapshot.inputHolders, policy: meetingPolicy
-        )
+        ) { pid in
+            pid.flatMap { NSRunningApplication(processIdentifier: $0)?.localizedName }
+        }
     }
 
     /// What the system stem holds for this start, and one line when that is the
@@ -361,45 +365,78 @@ extension AppState {
     /// failure), then the transcript .md joins it.
     private func runMeetingPipeline(_ capture: MeetingRecorder.Capture) async {
         let dir = MeetingRecorder.meetingsDirectory
-        let fm = FileManager.default
         let startedAt = meetingStartDate ?? Date().addingTimeInterval(-capture.duration)
-        let base = MeetingFileNamer.uniqueBaseName(for: startedAt) {
+        // The file name reads where the call was: the same call app the system
+        // stem was scoped to at the start (A1), slugged by the namer.
+        let base = MeetingFileNamer.uniqueBaseName(
+            for: startedAt, app: meetingCallApp?.displayName
+        ) {
             MeetingSalvage.nameIsTaken($0, in: dir)
         }
-
-        var audioName = base + ".m4a"
-        do {
-            try await M4AWriter.write(
-                samples16k: capture.mixed16k, to: dir.appendingPathComponent(audioName)
-            )
-        } catch {
-            // Fallback: raw WAV — bigger, but the take is never lost.
-            audioName = base + ".wav"
-            let wavURL = dir.appendingPathComponent(audioName)
-            let samples = capture.mixed16k
-            try? await Task.detached(priority: .userInitiated) {
-                let spool = try PCMSpoolFile(url: wavURL)
-                try spool.append(samples)
-                try spool.finalize()
-            }.value
-        }
+        let audioName = await writeMeetingAudio(capture: capture, dir: dir, base: base)
 
         // Too short to be a meeting (voice search, a voice message): the audio
         // stays, everything downstream — transcript, .md, hook, summary,
         // notification — is skipped, silently.
         guard MeetingTranscriptionRule.shouldTranscribe(duration: capture.duration) else {
-            meetingTranscription?.cancel()
-            try? fm.removeItem(at: capture.tempDir)
+            abandonShortTake(tempDir: capture.tempDir)
             return
         }
 
-        var transcript: String?
-        var failureDetail: String?
+        let result = await drainMeetingTranscript()
+        writeMeetingFiles(
+            dir: dir, base: base, startedAt: startedAt, duration: capture.duration,
+            audioName: audioName, result: result, tempDir: capture.tempDir
+        )
+    }
+
+    /// What the transcript drain came back with: text, why not, and whether the
+    /// stems stay parked for a retry.
+    private struct MeetingTranscriptResult: Sendable {
+        let transcript: String?
+        let failureDetail: String?
+        let needsRetry: Bool
+    }
+
+    private func writeMeetingAudio(
+        capture: MeetingRecorder.Capture, dir: URL, base: String
+    ) async -> String {
+        do {
+            try await M4AWriter.write(
+                samples16k: capture.mixed16k,
+                to: dir.appendingPathComponent(base + ".m4a")
+            )
+            return base + ".m4a"
+        } catch {
+            // Fallback: raw WAV — bigger, but the take is never lost.
+            return await writeMeetingWavFallback(capture: capture, dir: dir, base: base)
+        }
+    }
+
+    private func writeMeetingWavFallback(
+        capture: MeetingRecorder.Capture, dir: URL, base: String
+    ) async -> String {
+        let audioName = base + ".wav"
+        let wavURL = dir.appendingPathComponent(audioName)
+        let samples = capture.mixed16k
+        try? await Task.detached(priority: .userInitiated) {
+            let spool = try PCMSpoolFile(url: wavURL)
+            try spool.append(samples)
+            try spool.finalize()
+        }.value
+        return audioName
+    }
+
+    private func abandonShortTake(tempDir: URL) {
+        meetingTranscription?.cancel()
+        try? FileManager.default.removeItem(at: tempDir)
+    }
+
+    private func drainMeetingTranscript() async -> MeetingTranscriptResult {
         // No model on disk, or holes where chunks failed: this take still has
         // unrecognised text in it, so it is kept for a retry. Not `transcript ==
         // nil` — a silent meeting will never produce words and would then offer
         // itself for a retry forever.
-        var needsRetry = true
         if let pipeline = meetingTranscription {
             // Chunks were transcribed live during the recording; this only
             // drains the tail, so it returns within seconds even for long calls.
@@ -407,65 +444,94 @@ extension AppState {
             // timestamp and — when both tracks were recorded — with who spoke;
             // a jump in timestamps means a silent stretch.
             let segments = await pipeline.finish()
-            transcript = TranscriptSegment.render(
+            let transcript = TranscriptSegment.render(
                 segments,
                 meLabel: strings.meetingSpeakerMe,
                 themLabel: strings.meetingSpeakerThem
             )
-            needsRetry = pipeline.failedChunkCount > 0
-        } else {
-            // No local model on disk. Meetings NEVER go to the cloud (see
-            // makeMeetingTranscriptionPipeline) — keep the audio, say why.
-            failureDetail = strings.notifModelMissing
+            return MeetingTranscriptResult(
+                transcript: transcript,
+                failureDetail: nil,
+                needsRetry: pipeline.failedChunkCount > 0
+            )
         }
+        // No local model on disk. Meetings NEVER go to the cloud (see
+        // makeMeetingTranscriptionPipeline) — keep the audio, say why.
+        return MeetingTranscriptResult(
+            transcript: nil,
+            failureDetail: strings.notifModelMissing,
+            needsRetry: true
+        )
+    }
 
+    private func writeMeetingFiles(
+        dir: URL,
+        base: String,
+        startedAt: Date,
+        duration: TimeInterval,
+        audioName: String,
+        result: MeetingTranscriptResult,
+        tempDir: URL
+    ) {
         let markdown = Self.meetingMarkdown(
             strings: strings,
             language: language,
             date: startedAt,
-            duration: capture.duration,
+            duration: duration,
             audioFile: audioName,
-            transcript: transcript,
+            transcript: result.transcript,
+            callApp: meetingCallApp?.displayName,
             recovered: false
         )
         let mdURL = dir.appendingPathComponent(base + ".md")
         try? markdown.write(to: mdURL, atomically: true, encoding: .utf8)
 
-        if needsRetry {
-            // The retry reads the stems, so they move next to the meeting instead
-            // of being deleted. A move that fails must still clear the spool dir:
-            // audio and .md are already on disk, and a stray `.rec-` dir would
-            // come back as a second meeting on the next launch.
-            if (try? MeetingSalvage.stash(stems: capture.tempDir, base: base, in: dir)) == nil {
-                try? fm.removeItem(at: capture.tempDir)
-            }
+        if result.needsRetry {
+            parkMeetingStems(tempDir: tempDir, base: base, dir: dir)
         } else {
             // Audio and transcript are both on disk now, so whatever the user chains
             // after a meeting always opens a finished one. A meeting waiting for a
             // retry fires neither hook nor summary — both run once, after the retry.
             MeetingHook.fire(command: settings.meetingHook, mdURL: mdURL)
-            startSummary(meetingMd: mdURL, hasTranscript: transcript != nil)
-            try? fm.removeItem(at: capture.tempDir)
+            startSummary(meetingMd: mdURL, hasTranscript: result.transcript != nil)
+            try? FileManager.default.removeItem(at: tempDir)
         }
 
-        let body: String
-        if needsRetry, transcript != nil {
-            body = strings.notifMeetingPartial
-        } else if needsRetry, let failureDetail {
-            // The detail is the "download the model" line, which already points
-            // at the menu; a second hint about the menu would only repeat it.
-            body = strings.notifMeetingNoTranscript + " " + failureDetail
-        } else if needsRetry {
-            body = strings.notifMeetingNoTranscript + " " + strings.notifMeetingRetryHint
-        } else {
-            body = transcript != nil
-                ? strings.notifTranscriptReady
-                : strings.notifMeetingNoTranscript
-        }
-        notifier.notify(title: "sezish", body: body)
+        notifier.notify(title: "sezish", body: meetingResultBody(result: result))
 
         pendingMeetings = MeetingSalvage.discoverStems(in: dir)
         refreshMeetings()
+    }
+
+    private func parkMeetingStems(tempDir: URL, base: String, dir: URL) {
+        // The retry reads the stems, so they move next to the meeting instead
+        // of being deleted. A move that fails must still clear the spool dir:
+        // audio and .md are already on disk, and a stray `.rec-` dir would
+        // come back as a second meeting on the next launch.
+        if (try? MeetingSalvage.stash(stems: tempDir, base: base, in: dir)) == nil {
+            try? FileManager.default.removeItem(at: tempDir)
+        }
+    }
+
+    private func meetingResultBody(result: MeetingTranscriptResult) -> String {
+        guard result.needsRetry else {
+            return result.transcript != nil
+                ? strings.notifTranscriptReady
+                : strings.notifMeetingNoTranscript
+        }
+        return retryMeetingBody(result: result)
+    }
+
+    private func retryMeetingBody(result: MeetingTranscriptResult) -> String {
+        if result.transcript != nil {
+            return strings.notifMeetingPartial
+        }
+        if let failureDetail = result.failureDetail {
+            // The detail is the "download the model" line, which already points
+            // at the menu; a second hint about the menu would only repeat it.
+            return strings.notifMeetingNoTranscript + " " + failureDetail
+        }
+        return strings.notifMeetingNoTranscript + " " + strings.notifMeetingRetryHint
     }
 
     /// Hands a finished meeting to the summary engine and forgets about it.
@@ -522,6 +588,26 @@ extension AppState {
         return URL(fileURLWithPath: stored.path)
     }
 
+    /// First line of the meeting document: with a known call app it names it
+    /// ("Звонок в Telegram, …"), otherwise the plain title, as before.
+    nonisolated static func meetingTitle(
+        strings: Strings, language: AppLanguage, date: Date, callApp: String?
+    ) -> String {
+        let stamp = meetingDateStamp(language: language, date: date)
+        if let callApp {
+            return "# \(String(format: strings.meetingDocTitleApp, callApp)) - \(stamp)\n\n"
+        }
+        return "# \(strings.meetingDocTitle) - \(stamp)\n\n"
+    }
+
+    nonisolated static func meetingDateStamp(language: AppLanguage, date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: language == .uz ? "uz" : "ru")
+        formatter.dateStyle = .long
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
+    }
+
     /// `recovered` marks a meeting rebuilt from crash-orphaned stems. The engine
     /// line is derived, not passed: it belongs with a transcript, and meetings
     /// are ALWAYS on-device, so the sentence is static by design.
@@ -532,17 +618,13 @@ extension AppState {
         duration: TimeInterval,
         audioFile: String,
         transcript: String?,
+        callApp: String? = nil,
         recovered: Bool = false
     ) -> String {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: language == .uz ? "uz" : "ru")
-        formatter.dateStyle = .long
-        formatter.timeStyle = .short
-
         let minutes = Int(duration) / 60
         let seconds = Int(duration) % 60
 
-        var md = "# \(strings.meetingDocTitle) - \(formatter.string(from: date))\n\n"
+        var md = meetingTitle(strings: strings, language: language, date: date, callApp: callApp)
         if recovered {
             md += "_\(strings.meetingDocRecovered)_\n\n"
         }
@@ -554,14 +636,5 @@ extension AppState {
         md += transcript ?? "_\(strings.notifMeetingNoTranscript)_"
         md += "\n"
         return md
-    }
-}
-
-extension MeetingCallApp {
-    /// Only AppKit can turn a pid into a name, so the lookup lives here while the
-    /// choice of *whose* pid stays pure (`MeetingCallAppResolver`). A process that
-    /// quit since the meeting started simply has no name.
-    var displayName: String? {
-        pid.flatMap { NSRunningApplication(processIdentifier: $0)?.localizedName }
     }
 }

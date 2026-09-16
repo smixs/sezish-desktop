@@ -42,11 +42,16 @@ public struct MeetingCallApp: Equatable, Sendable {
     /// the app and no current process matched it.
     public let pid: pid_t?
     public let family: String
+    /// The app's display name, snapshotted once at the meeting start while the
+    /// process is known alive: a pid read later may be dead or reused by now.
+    /// Nil when no live process matched — then the meeting stays nameless.
+    public let displayName: String?
 
-    public init(bundleID: String, pid: pid_t?, family: String) {
+    public init(bundleID: String, pid: pid_t?, family: String, displayName: String? = nil) {
         self.bundleID = bundleID
         self.pid = pid
         self.family = family
+        self.displayName = displayName
     }
 
     /// Where the system stem comes from, once the app is known.
@@ -118,21 +123,29 @@ public enum MeetingCallAppResolver {
 
     /// The detector's answer is authoritative; the pid only names it for the
     /// user, so a holder that vanished costs the name and not the scope.
+    /// `displayName` maps that pid to a name (AppKit on the caller's side) and
+    /// is stored as is — the resolver never looks names up itself.
     public static func resolve(
-        source: MeetingStartSource, holders: [Holder], policy: MeetingDetectionPolicy
+        source: MeetingStartSource, holders: [Holder], policy: MeetingDetectionPolicy,
+        displayName: (pid_t?) -> String? = { _ in nil }
     ) -> MeetingCallApp? {
         switch source {
-        case .auto(let bundleID): return bundleID.map { auto(bundleID: $0, holders: holders) }
-        case .manual: return manual(holders: holders, policy: policy)
+        case .auto(let bundleID):
+            return bundleID.map { auto(bundleID: $0, holders: holders, displayName: displayName) }
+        case .manual: return manual(holders: holders, policy: policy, displayName: displayName)
         }
     }
 
     /// A helper id is a fine answer here: the tap is scoped to the family, and
     /// every helper of that app is inside it.
-    private static func auto(bundleID: String, holders: [Holder]) -> MeetingCallApp {
+    private static func auto(
+        bundleID: String, holders: [Holder], displayName: (pid_t?) -> String?
+    ) -> MeetingCallApp {
         let family = CallAppFamily.of(bundleID)
         let pid = holders.first { CallAppFamily.belongs($0.bundleID, to: family) }?.pid
-        return MeetingCallApp(bundleID: bundleID, pid: pid, family: family)
+        return MeetingCallApp(
+            bundleID: bundleID, pid: pid, family: family, displayName: displayName(pid)
+        )
     }
 
     /// No detector answer, so the call app is the mic holder the policy would
@@ -140,11 +153,16 @@ public enum MeetingCallAppResolver {
     /// playing audio comes first: a call is full-duplex, while an input-only holder
     /// (a voice search, a recorder the deny list missed) renders no remote audio
     /// for the tap to capture.
-    private static func manual(holders: [Holder], policy: MeetingDetectionPolicy) -> MeetingCallApp? {
+    private static func manual(
+        holders: [Holder], policy: MeetingDetectionPolicy, displayName: (pid_t?) -> String?
+    ) -> MeetingCallApp? {
         let recordable = holders.filter { policy.classify($0.bundleID) == .record }
         let chosen = recordable.first { $0.isRunningOutput } ?? recordable.first
         return chosen.map {
-            MeetingCallApp(bundleID: $0.bundleID, pid: $0.pid, family: CallAppFamily.of($0.bundleID))
+            MeetingCallApp(
+                bundleID: $0.bundleID, pid: $0.pid, family: CallAppFamily.of($0.bundleID),
+                displayName: displayName($0.pid)
+            )
         }
     }
 }

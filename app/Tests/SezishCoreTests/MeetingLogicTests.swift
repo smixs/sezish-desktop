@@ -296,6 +296,71 @@ struct MeetingFileNamerTests {
     }
 }
 
+struct MeetingFileNamerAppTests {
+    private var utc: Calendar {
+        var c = Calendar(identifier: .gregorian)
+        c.timeZone = TimeZone(identifier: "UTC")!
+        return c
+    }
+
+    private var date: Date {
+        utc.date(from: DateComponents(year: 2026, month: 9, day: 16, hour: 8, minute: 32))!
+    }
+
+    @Test func telegramSlugRoundTrip() {
+        let base = MeetingFileNamer.baseName(for: date, app: "Telegram", calendar: utc)
+        #expect(base == "call-2026-09-16-08-32-telegram")
+        #expect(MeetingFileNamer.date(fromBaseName: base, calendar: utc) == date)
+    }
+
+    @Test func zoomBundleIDSlugRoundTrip() {
+        let base = MeetingFileNamer.baseName(for: date, app: "zoom.us", calendar: utc)
+        #expect(base == "call-2026-09-16-08-32-zoomus")
+        #expect(MeetingFileNamer.date(fromBaseName: base, calendar: utc) == date)
+    }
+
+    @Test func chromeSlugRoundTrip() {
+        let base = MeetingFileNamer.baseName(for: date, app: "Google Chrome", calendar: utc)
+        #expect(base == "call-2026-09-16-08-32-googlechrome")
+        #expect(MeetingFileNamer.date(fromBaseName: base, calendar: utc) == date)
+    }
+
+    @Test func cyrillicNameGetsNoSuffix() {
+        let base = MeetingFileNamer.baseName(for: date, app: "Яндекс Браузер", calendar: utc)
+        #expect(base == "call-2026-09-16-08-32")
+        #expect(MeetingFileNamer.date(fromBaseName: base, calendar: utc) == date)
+    }
+
+    @Test func digitsOnlyNameGetsNoSuffix() {
+        let base = MeetingFileNamer.baseName(for: date, app: "2026", calendar: utc)
+        #expect(base == "call-2026-09-16-08-32")
+        #expect(MeetingFileNamer.date(fromBaseName: base, calendar: utc) == date)
+    }
+
+    @Test func slugTruncatesToSixteenAsciiChars() {
+        #expect(MeetingFileNamer.appSlug(from: "SomeVeryLongApplicationName") == "someverylongappl")
+        #expect(MeetingFileNamer.appSlug(from: "Яндекс Браузер") == nil)
+        #expect(MeetingFileNamer.appSlug(from: "2026") == nil)
+    }
+
+    @Test func collisionSuffixGoesAfterSlug() {
+        let dated = "call-2026-09-16-08-32-telegram"
+        let taken: Set<String> = [dated, dated + "-2"]
+        let name = MeetingFileNamer.uniqueBaseName(for: date, app: "Telegram", calendar: utc) {
+            taken.contains($0)
+        }
+        #expect(name == dated + "-3")
+        #expect(MeetingFileNamer.date(fromBaseName: name, calendar: utc) == date)
+    }
+
+    @Test func refusesSlugGarbage() {
+        #expect(MeetingFileNamer.date(fromBaseName: "call-2026-09-16-08-32-Telegram", calendar: utc) == nil)
+        #expect(MeetingFileNamer.date(fromBaseName: "call-2026-09-16-08-32-telegram-2-3", calendar: utc) == nil)
+        #expect(MeetingFileNamer.date(fromBaseName: "call-2026-09-16-08-32-2-telegram", calendar: utc) == nil)
+        #expect(MeetingFileNamer.date(fromBaseName: "standup-2026-09-16-08-32", calendar: utc) == nil)
+    }
+}
+
 struct CallAppFamilyTests {
     /// Every anchor the spec names, spelled out: a helper folds into the app it
     /// serves, an id without a `.helper` segment is its own family. Exact answers,
@@ -472,5 +537,32 @@ struct PlaySoundsSettingTests {
         #expect(settings.playSounds == true)
         settings.playSounds = false
         #expect(settings.playSounds == false)
+    }
+}
+
+struct MeetingCallAppDisplayNameTests {
+    private let policy = MeetingDetectionPolicy(ownBundleID: "com.smixs.sezish")
+
+    /// The AppKit lookup is the caller's input: whatever it returns lands in
+    /// the app as is, so the name is snapshotted once while the process lives.
+    @Test func displayNamePassesThroughAsIs() {
+        let app = MeetingCallAppResolver.resolve(
+            source: .auto(bundleID: "us.zoom.xos"),
+            holders: [.init(bundleID: "us.zoom.xos", pid: 8, isRunningOutput: true)],
+            policy: policy,
+            displayName: { _ in "Telegram" }
+        )
+        #expect(app?.displayName == "Telegram")
+    }
+
+    @Test func vanishedProcessLeavesNoDisplayName() {
+        let app = MeetingCallAppResolver.resolve(
+            source: .manual,
+            holders: [.init(bundleID: "us.zoom.xos", pid: 8, isRunningOutput: true)],
+            policy: policy,
+            displayName: { _ in nil }
+        )
+        #expect(app?.bundleID == "us.zoom.xos")
+        #expect(app?.displayName == nil)
     }
 }

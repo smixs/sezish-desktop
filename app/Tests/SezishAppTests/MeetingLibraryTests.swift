@@ -91,4 +91,43 @@ import Testing
         #expect(entries.last?.stemsURL
             == dir.appendingPathComponent(".stems-call-2026-07-13-21-33", isDirectory: true))
     }
+
+    @Test func slugNamesKeepTheirDates() throws {
+        let dir = try makeMeetingsDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try writeMeeting(in: dir, base: "call-2026-09-16-08-32-telegram")
+        try writeMeeting(in: dir, base: "call-2026-09-16-08-32-telegram-2")
+
+        let entries = MeetingLibrary.entries(in: dir)
+
+        // A slug (and a collision suffix after it) is not a date: both takes
+        // land on the minute the name carries.
+        #expect(entries.count == 2)
+        let expected = try #require(Calendar.current.date(from: DateComponents(
+            year: 2026, month: 9, day: 16, hour: 8, minute: 32)))
+        #expect(entries.allSatisfy { $0.date == expected })
+    }
+}
+
+/// First line of the meeting document: with a known call app it names it.
+@MainActor // `Strings.ru` reads synchronously: the app target is MainActor-by-default.
+@Suite struct MeetingTitleTests {
+    @Test func titleNamesTheCallApp() {
+        let at = Date(timeIntervalSinceReferenceDate: 0)
+        let ru = AppState.meetingTitle(strings: .ru, language: .ru, date: at, callApp: "Telegram")
+        #expect(ru.hasPrefix("# Звонок в Telegram - "))
+        let uz = AppState.meetingTitle(strings: .uz, language: .uz, date: at, callApp: "Telegram")
+        #expect(uz.hasPrefix("# Telegram qoʼngʼirogʼi - "))
+        // No app (a salvaged meeting, an unknown process): the plain title, as before.
+        let plain = AppState.meetingTitle(strings: .ru, language: .ru, date: at, callApp: nil)
+        #expect(plain.hasPrefix("# Запись звонка - "))
+    }
+
+    @Test func markdownCarriesTheCallAppIntoItsTitle() {
+        let md = AppState.meetingMarkdown(
+            strings: .ru, language: .ru, date: Date(timeIntervalSinceReferenceDate: 0),
+            duration: 61, audioFile: "call.m4a", transcript: "x", callApp: "Telegram"
+        )
+        #expect(md.hasPrefix("# Звонок в Telegram - "))
+    }
 }
