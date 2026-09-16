@@ -96,10 +96,110 @@ struct MeetingDetectionPolicyTests {
 
 struct MeetingTranscriptionRuleTests {
     @Test func shortRecordingsAreNotTranscribed() {
-        #expect(!MeetingTranscriptionRule.shouldTranscribe(duration: 0))
-        #expect(!MeetingTranscriptionRule.shouldTranscribe(duration: 59.9))
-        #expect(MeetingTranscriptionRule.shouldTranscribe(duration: 60))
-        #expect(MeetingTranscriptionRule.shouldTranscribe(duration: 3600))
+        #expect(!MeetingTranscriptionRule.shouldTranscribe(duration: 0, stopReason: .manual))
+        #expect(!MeetingTranscriptionRule.shouldTranscribe(duration: 59.9, stopReason: .manual))
+        #expect(MeetingTranscriptionRule.shouldTranscribe(duration: 60, stopReason: .manual))
+        #expect(MeetingTranscriptionRule.shouldTranscribe(duration: 3600, stopReason: .manual))
+    }
+
+    /// The window the stop watch waited out is not meeting time: eleven minutes
+    /// of recording that ended in the ten-minute silence window is one minute of
+    /// meeting — and without the discount no auto-stop could ever be short.
+    @Test func theStopWatchSilenceIsNotMeetingTime() {
+        #expect(MeetingTranscriptionRule.shouldTranscribe(duration: 660, stopReason: .silence(600)))
+        #expect(!MeetingTranscriptionRule.shouldTranscribe(duration: 650, stopReason: .silence(600)))
+    }
+
+    /// The detector's stop window is quiet too — the debounce's ten seconds.
+    @Test func theDebounceWindowIsNotMeetingTime() {
+        #expect(MeetingTranscriptionRule.shouldTranscribe(duration: 70, stopReason: .callEnded(10)))
+        #expect(!MeetingTranscriptionRule.shouldTranscribe(duration: 69, stopReason: .callEnded(10)))
+    }
+
+    /// A manual stop and the ceiling discount nothing: every second of those
+    /// recordings is time somebody asked for.
+    @Test func manualAndCeilingStopsDiscountNothing() {
+        #expect(MeetingTranscriptionRule.shouldTranscribe(duration: 60, stopReason: .manual))
+        #expect(MeetingTranscriptionRule.shouldTranscribe(duration: 60, stopReason: .ceiling(18_000)))
+    }
+}
+
+struct MeetingAutoStopTests {
+    private let t0 = Date(timeIntervalSinceReferenceDate: 2_000_000)
+
+    @Test func tenMinutesOfSilenceEndAnAutoStartedRecording() {
+        var stop = MeetingAutoStop(startedAt: t0, isAuto: true)
+        #expect(stop.tick(micLoud: false, systemLoud: false, at: t0) == nil)
+        #expect(stop.tick(micLoud: false, systemLoud: false, at: t0 + 599) == nil)
+        #expect(stop.tick(micLoud: false, systemLoud: false, at: t0 + 600) == .silence(600))
+    }
+
+    /// A silent mic is not a silent room: the other side of the call is a voice,
+    /// and any sound restarts the window.
+    @Test func aTrackThatIsStillTalkingKeepsTheRecordingAlive() {
+        var stop = MeetingAutoStop(startedAt: t0, isAuto: true)
+        #expect(stop.tick(micLoud: false, systemLoud: false, at: t0) == nil)
+        #expect(stop.tick(micLoud: false, systemLoud: true, at: t0 + 300) == nil)
+        #expect(stop.tick(micLoud: false, systemLoud: false, at: t0 + 600) == nil)
+        #expect(stop.tick(micLoud: false, systemLoud: false, at: t0 + 1_199) == nil)
+        #expect(stop.tick(micLoud: false, systemLoud: false, at: t0 + 1_200) == .silence(600))
+    }
+
+    @Test func theCeilingEndsAnAutoStartedRecording() {
+        var stop = MeetingAutoStop(startedAt: t0, isAuto: true)
+        #expect(stop.tick(micLoud: true, systemLoud: true, at: t0 + 5 * 3_600 - 1) == nil)
+        #expect(
+            stop.tick(micLoud: true, systemLoud: true, at: t0 + 5 * 3_600)
+                == .ceiling(5 * 3_600)
+        )
+    }
+
+    /// A manual recording is the user's own: silence never ends it, but the
+    /// ceiling does — an eight-hour take is a bug, whoever started it.
+    @Test func aManualRecordingIgnoresSilenceButNotTheCeiling() {
+        var stop = MeetingAutoStop(startedAt: t0, isAuto: false)
+        #expect(stop.tick(micLoud: false, systemLoud: false, at: t0 + 600) == nil)
+        #expect(stop.tick(micLoud: false, systemLoud: false, at: t0 + 4 * 3_600) == nil)
+        #expect(
+            stop.tick(micLoud: false, systemLoud: false, at: t0 + 5 * 3_600)
+                == .ceiling(5 * 3_600)
+        )
+    }
+
+    /// The thresholds are hidden settings, and a stop that carries its own window
+    /// is what the short-recording rule discounts.
+    @Test func customThresholdsReplaceTheDefaults() {
+        var stop = MeetingAutoStop(startedAt: t0, isAuto: true, silenceAfter: 60, maxDuration: 120)
+        #expect(stop.tick(micLoud: false, systemLoud: false, at: t0) == nil)
+        #expect(stop.tick(micLoud: false, systemLoud: false, at: t0 + 60) == .silence(60))
+    }
+}
+
+struct MeetingLoudnessMeterTests {
+    private let loud = [Float](repeating: 0.05, count: 1_600)
+    private let roomTone = [Float](repeating: 0.005, count: 1_600)
+
+    @Test func aLoudFrameMarksTheTrackLoud() {
+        var meter = MeetingLoudnessMeter()
+        let loudFrame = meter.append(loud)
+        #expect(loudFrame)
+    }
+
+    @Test func roomToneAndEmptyBuffersAreNotSpeech() {
+        var meter = MeetingLoudnessMeter()
+        let roomToneFrame = meter.append(roomTone)
+        let nothing = meter.append([])
+        #expect(!roomToneFrame)
+        #expect(!nothing)
+    }
+
+    /// Realtime buffers are shorter than a frame: half a frame is not a verdict.
+    @Test func framesAccumulateAcrossBuffers() {
+        var meter = MeetingLoudnessMeter()
+        let half = meter.append(Array(loud[..<800]))
+        #expect(!half)
+        let secondHalf = meter.append(Array(loud[800...]))
+        #expect(secondHalf)
     }
 }
 

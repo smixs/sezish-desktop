@@ -413,7 +413,9 @@ extension AppState {
         // Too short to be a meeting (voice search, a voice message): the audio
         // stays, everything downstream — transcript, .md, hook, summary,
         // notification — is skipped, silently.
-        guard MeetingTranscriptionRule.shouldTranscribe(duration: capture.duration) else {
+        guard MeetingTranscriptionRule.shouldTranscribe(
+            duration: capture.duration, stopReason: .manual
+        ) else {
             abandonShortTake(tempDir: capture.tempDir)
             return
         }

@@ -21,7 +21,15 @@ public struct MeetingDebounce: Sendable {
     private let startAfter: TimeInterval
     private let stopAfter: TimeInterval
 
-    public init(startAfter: TimeInterval = 2, stopAfter: TimeInterval = 10) {
+    /// Defaults, exposed because the short-recording rule discounts the same stop
+    /// window the detector waited out before it called the call ended.
+    public static let defaultStartAfter: TimeInterval = 2
+    public static let defaultStopAfter: TimeInterval = 10
+
+    public init(
+        startAfter: TimeInterval = Self.defaultStartAfter,
+        stopAfter: TimeInterval = Self.defaultStopAfter
+    ) {
         self.startAfter = startAfter
         self.stopAfter = stopAfter
     }
@@ -78,7 +86,14 @@ public struct MeetingDebounce: Sendable {
 public enum MeetingTranscriptionRule {
     public static let minimumSeconds: TimeInterval = 60
 
-    public static func shouldTranscribe(duration: TimeInterval) -> Bool {
+    /// `stopReason`'s trailing silence is not meeting time: an auto-started
+    /// recording ends with the silence window that stopped it, so without the
+    /// discount the "short recording" rule could never fire for exactly the
+    /// recordings it exists for.
+    public static func shouldTranscribe(
+        duration: TimeInterval, stopReason: MeetingStopReason
+    ) -> Bool {
+        // RED: the discount lands with `trailingSilence` in the next commit.
         duration >= minimumSeconds
     }
 }

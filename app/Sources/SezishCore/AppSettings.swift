@@ -220,6 +220,20 @@ public final class AppSettings {
         return command
     }
 
+    /// Hidden setting, no UI: minutes of both-track silence after which an
+    /// auto-started recording stops itself. 0 or an absent key keeps the default —
+    /// the net is for the recording the user forgot about, not a switch.
+    /// `defaults write com.smixs.sezish meetingSilenceStopMinutes -int 1`.
+    public var meetingSilenceStopAfter: TimeInterval {
+        // RED: the hidden setting lands in the next commit.
+        MeetingAutoStop.defaultSilenceAfter
+    }
+
+    /// Same, for the ceiling: hidden `meetingMaxDurationMinutes`, in minutes.
+    public var meetingMaxDurationAfter: TimeInterval {
+        MeetingAutoStop.defaultMaxDuration
+    }
+
     /// Which locally installed CLI writes the meeting summaries. Stored raw so a value
     /// from a newer build (or a typo in `defaults write`) degrades to the default.
     public var summaryEngine: SummaryEngineKind {
@@ -266,6 +280,8 @@ public final class AppSettings {
         static let playSounds = "playSounds"
         static let extraDenyApps = "extraDenyApps"
         static let meetingHook = "meetingHook"
+        static let meetingSilenceStopMinutes = "meetingSilenceStopMinutes"
+        static let meetingMaxDurationMinutes = "meetingMaxDurationMinutes"
         static let summaryEngine = "summaryEngine"
         static let summaryEnabled = "summaryEnabled"
     }
