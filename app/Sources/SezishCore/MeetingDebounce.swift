@@ -58,6 +58,18 @@ public struct MeetingDebounce: Sendable {
     public mutating func reset() {
         state = .idle
     }
+
+    /// Seconds since the candidate window opened; nil unless debouncing a start.
+    public func candidateHeldSeconds(at now: Date) -> TimeInterval? {
+        if case .candidate(let since) = state { return now.timeIntervalSince(since) }
+        return nil
+    }
+
+    /// Seconds since the mic went quiet mid-call; nil unless debouncing a stop.
+    public func endingSilenceSeconds(at now: Date) -> TimeInterval? {
+        if case .ending(let since) = state { return now.timeIntervalSince(since) }
+        return nil
+    }
 }
 
 /// Recordings shorter than this get their audio kept but no transcript, no

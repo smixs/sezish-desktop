@@ -15,6 +15,11 @@ import SezishCore
 final class MeetingDetector {
     var onMeetingStart: ((_ bundleID: String?) -> Void)?
     var onMeetingEnd: (() -> Void)?
+    /// Fires after every tick with what the detector thinks right now; AppState
+    /// mirrors it into the one-line "why not recording" menu hint.
+    /// That tick's facts; AppState stores them and rebuilds the decision at
+    /// render time, when the app status is known.
+    var onStatus: ((MeetingDetectorFacts) -> Void) = { _ in }
 
     private let policy: MeetingDetectionPolicy
     private var debounce = MeetingDebounce()
@@ -46,23 +51,65 @@ final class MeetingDetector {
     }
 
     private func tick() {
+        // One clock per tick: the debounce and the published facts share it.
+        let now = Date()
         let holders = AudioProcessList.activeInputHolders()
-        for holder in holders where holder.isRunningOutput {
-            seenOutput.insert(holder.bundleID)
-        }
-        let duplex = holders.filter { seenOutput.contains($0.bundleID) }
-        let candidate = policy.candidate(among: duplex.map(\.bundleID))
+        noteOutput(holders: holders)
+        let candidate = policy.candidate(among: duplexIDs(holders: holders))
+        let event = debounce.tick(externalMicActive: candidate != nil, at: now)
+        publishStatus(holders: holders, candidate: candidate, at: now)
+        handle(event: event, candidate: candidate, holdersEmpty: holders.isEmpty)
+    }
 
-        switch debounce.tick(externalMicActive: candidate != nil, at: Date()) {
-        case .start:
+    private func noteOutput(holders: [AudioProcessList.MicHolder]) {
+        holders.filter(\.isRunningOutput).forEach { seenOutput.insert($0.bundleID) }
+    }
+
+    private func duplexIDs(holders: [AudioProcessList.MicHolder]) -> [String] {
+        holders.filter { seenOutput.contains($0.bundleID) }.map(\.bundleID)
+    }
+
+    private func handle(
+        event: MeetingDebounce.Event?,
+        candidate: MeetingDetectionPolicy.Candidate?,
+        holdersEmpty: Bool
+    ) {
+        // If-chain, not switch: the arms end in callbacks, and only three
+        // events exist — a future fourth must get its own arm here, not ride
+        // the stop path below.
+        if event == .start {
             onMeetingStart?(candidate?.bundleID)
-        case .stop:
-            seenOutput.removeAll()
-            onMeetingEnd?()
-        case nil:
-            // Nobody on the mic at all: the next session starts with a clean slate.
-            if holders.isEmpty { seenOutput.removeAll() }
+            return
         }
+        if event == nil {
+            noteSilence(holdersEmpty: holdersEmpty)
+            return
+        }
+        seenOutput.removeAll()
+        onMeetingEnd?()
+    }
+
+    private func noteSilence(holdersEmpty: Bool) {
+        // Nobody on the mic at all: the next session starts with a clean slate.
+        if holdersEmpty { seenOutput.removeAll() }
+    }
+
+    private func publishStatus(
+        holders: [AudioProcessList.MicHolder],
+        candidate: MeetingDetectionPolicy.Candidate?,
+        at now: Date
+    ) {
+        onStatus(MeetingDetectorFacts(
+            debounce: debounce,
+            candidateName: candidate.flatMap { id in
+                holders.first(where: { $0.bundleID == id.bundleID })
+                    .map(AudioProcessList.displayName(of:))
+            },
+            deniedNames: policy.deniedNames(among: holders.map {
+                (bundleID: $0.bundleID, displayName: AudioProcessList.displayName(of: $0))
+            }),
+            at: now
+        ))
     }
 }
 
@@ -74,6 +121,17 @@ enum AudioProcessList {
         /// True when the same process also has an active output stream
         /// (`kAudioProcessPropertyIsRunningOutput`): the remote side of a call.
         let isRunningOutput: Bool
+    }
+
+    /// Display name for the menu line: the running app's name when the pid is
+    /// known, else the last bundle id segment ("us.zoom.xos" reads as "xos").
+    nonisolated static func displayName(of holder: MicHolder) -> String {
+        if holder.pid > 0,
+            let name = NSRunningApplication(processIdentifier: holder.pid)?.localizedName,
+            !name.isEmpty {
+            return name
+        }
+        return holder.bundleID.components(separatedBy: ".").last ?? holder.bundleID
     }
 
     /// Everyone currently holding the mic. Helpers without a CoreAudio bundle

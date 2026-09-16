@@ -40,6 +40,27 @@ public struct MeetingDetectionPolicy: Sendable {
         return .record
     }
 
+    /// Its own bundle id (same prefix match as `classify`): the app itself is
+    /// never shown as a mic holder.
+    public func isOwn(_ bundleID: String) -> Bool {
+        bundleID.lowercased().hasPrefix(ownPrefix)
+    }
+
+    /// Display names of the deny-classified holders for the "mic is busy" line:
+    /// the own process filtered out, duplicate names collapsed to one.
+    public func deniedNames(
+        among holders: [(bundleID: String, displayName: String)]
+    ) -> [String] {
+        var seen = Set<String>()
+        return holders.filter { isDeniedHolder($0) }.map(\.displayName).filter {
+            seen.insert($0).inserted
+        }
+    }
+
+    private func isDeniedHolder(_ holder: (bundleID: String, displayName: String)) -> Bool {
+        classify(holder.bundleID) == .deny && !isOwn(holder.bundleID)
+    }
+
     /// The first non-deny mic holder this tick; nil when every holder is
     /// deny/own — that feeds the debounce as "mic inactive", so dictation
     /// tools can never even start a session.
