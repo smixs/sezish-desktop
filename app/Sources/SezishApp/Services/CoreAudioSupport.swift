@@ -1,8 +1,10 @@
+import AppKit
 import AudioToolbox
 import Foundation
 import SezishCore
 
-// Minimal CoreAudio property helpers for the process tap and meeting detector.
+// Minimal CoreAudio property helpers for the process tap, the meeting detector
+// and the mic route.
 // Adapted from insidegui/AudioCap (https://github.com/insidegui/AudioCap,
 // BSD-2-Clause license).
 
@@ -98,16 +100,72 @@ extension AudioObjectID {
     }
 }
 
-/// Which of the live processes a family scope covers. An empty list is a real
-/// answer — nothing of that family is running — and what an empty list means for
-/// the recording is the tap's call, not this helper's. Throws only when the
-/// system-wide process list cannot be read at all.
+/// One read of CoreAudio's process list, in the two shapes a meeting start needs:
+/// the tap candidates (every process, with the bundle id CoreAudio gives it) and
+/// the mic holders the call-app decision is made from. One read, because a second
+/// one a moment later can name a process the first never saw.
+struct AudioProcessSnapshot: Sendable {
+    struct Process: Sendable {
+        let id: UInt32
+        let bundleID: String?
+        let pid: pid_t?
+        let isRunningInput: Bool
+        let isRunningOutput: Bool
+    }
+
+    let processes: [Process]
+
+    /// Nothing could be read: the meeting then records the mic and every process,
+    /// the same degradation as a call app with no live process of its own.
+    static let empty = AudioProcessSnapshot(processes: [])
+
+    /// Every live process, with the bundle id CoreAudio reports — or the one
+    /// `NSRunningApplication` knows it by, exactly as the detector resolves it: the
+    /// helper that renders the call's audio may not be named by CoreAudio at all.
+    nonisolated static func read() throws -> AudioProcessSnapshot {
+        AudioProcessSnapshot(
+            processes: try AudioObjectID.readProcessList().map { object in
+                let pid = object.readProcessPID()
+                return Process(
+                    id: object,
+                    bundleID: object.readProcessBundleID()
+                        ?? pid.flatMap { NSRunningApplication(processIdentifier: $0)?.bundleIdentifier },
+                    pid: pid,
+                    isRunningInput: object.readProcessIsRunningInput(),
+                    isRunningOutput: object.readProcessIsRunningOutput()
+                )
+            }
+        )
+    }
+
+    /// The pairs the tap coverage is decided over.
+    nonisolated var tapCandidates: [(id: UInt32, bundleID: String?)] {
+        processes.map { (id: $0.id, bundleID: $0.bundleID) }
+    }
+
+    /// The mic holders, as `MeetingCallAppResolver` and the detector both judge
+    /// them: a process on the mic that nothing can name is not a call surface.
+    nonisolated var inputHolders: [MeetingCallAppResolver.Holder] {
+        processes.compactMap { process in
+            guard process.isRunningInput, let bundleID = process.bundleID, let pid = process.pid
+            else { return nil }
+            return MeetingCallAppResolver.Holder(
+                bundleID: bundleID, pid: pid, isRunningOutput: process.isRunningOutput
+            )
+        }
+    }
+}
+
+/// The CoreAudio objects behind a scope: an adapter over the pure decision
+/// `coverage(live:)`, which is where "what do we tap" is answered.
 extension MeetingAudioScope {
+    /// The objects this scope covers. `.all` has no list to begin with, and a family
+    /// with nothing live is an empty one — both mean "the whole system" to a caller
+    /// that asked for objects rather than for a coverage.
     nonisolated func liveProcessIDs() throws -> [AudioObjectID] {
-        guard case .family(let family) = self else { return [] }
-        return try AudioObjectID.readProcessList().filter { object in
-            guard let bundleID = object.readProcessBundleID() else { return false }
-            return CallAppFamily.belongs(bundleID, to: family)
+        switch coverage(live: try AudioProcessSnapshot.read().tapCandidates) {
+        case .global: return []
+        case .processes(let ids): return ids
         }
     }
 }

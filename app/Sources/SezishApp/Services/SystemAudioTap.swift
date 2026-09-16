@@ -1,5 +1,4 @@
-import os
-@preconcurrency import AVFoundation
+import AVFoundation
 import AudioToolbox
 import Foundation
 import SezishCore
@@ -32,7 +31,6 @@ enum SystemAudioTapError: LocalizedError {
 nonisolated final class SystemAudioTap: @unchecked Sendable {
     private let onSamples16k: @Sendable ([Float]) -> Void
     private let queue = DispatchQueue(label: "com.smixs.sezish.system-tap", qos: .userInitiated)
-    private let logger = Logger(subsystem: "com.smixs.sezish", category: "system-tap")
 
     private var tapID: AudioObjectID = kAudioObjectUnknown
     private var tapUUID = UUID()
@@ -48,8 +46,8 @@ nonisolated final class SystemAudioTap: @unchecked Sendable {
         self.onSamples16k = onSamples16k
     }
 
-    func start(scope: MeetingAudioScope) throws {
-        try queue.sync { try startOnQueue(scope: scope) }
+    func start(coverage: TapCoverage) throws {
+        try queue.sync { try startOnQueue(coverage: coverage) }
     }
 
     func stop() {
@@ -58,11 +56,11 @@ nonisolated final class SystemAudioTap: @unchecked Sendable {
 
     // MARK: - On queue
 
-    private func startOnQueue(scope: MeetingAudioScope) throws {
+    private func startOnQueue(coverage: TapCoverage) throws {
         guard !running else { return }
 
-        // 1. Mono mixdown tap over the requested scope (TCC prompt on first use).
-        let description = makeTapDescription(for: scope)
+        // 1. Mono mixdown tap over what the start decided (TCC prompt on first use).
+        let description = makeTapDescription(for: coverage)
         description.uuid = UUID()
         description.muteBehavior = .unmuted
         description.isPrivate = true
@@ -103,35 +101,15 @@ nonisolated final class SystemAudioTap: @unchecked Sendable {
         self.converter = converter
     }
 
-    /// One tap description per recording: a device change rebuilds only the
-    /// aggregate that hosts this tap, so the scope survives it by construction.
-    private func makeTapDescription(for scope: MeetingAudioScope) -> CATapDescription {
-        let processes = liveProcesses(of: scope)
-        guard !processes.isEmpty else {
-            logFallbackToGlobal(scope)
+    /// The one CoreAudio description that can express a coverage — which coverage
+    /// that is was decided in `SezishCore` (`MeetingAudioScope.coverage`). One
+    /// description per recording: a device change rebuilds only the aggregate that
+    /// hosts this tap, so the coverage survives it by construction.
+    private func makeTapDescription(for coverage: TapCoverage) -> CATapDescription {
+        guard case .processes(let ids) = coverage else {
             return CATapDescription(monoGlobalTapButExcludeProcesses: [])
         }
-        return CATapDescription(monoMixdownOfProcesses: processes)
-    }
-
-    /// Nothing to tap — a family with no live process, or an unreadable process
-    /// list — is the one degradation this path allows: recording the whole Mac
-    /// beats not recording the meeting at all.
-    private func liveProcesses(of scope: MeetingAudioScope) -> [AudioObjectID] {
-        do {
-            return try scope.liveProcessIDs()
-        } catch {
-            logger.error(
-                "process list unreadable for \(String(describing: scope), privacy: .public): \(error.localizedDescription, privacy: .public)"
-            )
-            return []
-        }
-    }
-
-    /// `.all` is the fallback itself, so only a named family is worth a line.
-    private func logFallbackToGlobal(_ scope: MeetingAudioScope) {
-        guard case .family(let family) = scope else { return }
-        logger.notice("no live process in \(family, privacy: .public): recording all system audio")
+        return CATapDescription(monoMixdownOfProcesses: ids)
     }
 
     private func stopOnQueue() {

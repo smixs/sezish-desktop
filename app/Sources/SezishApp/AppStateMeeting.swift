@@ -2,6 +2,11 @@ import AppKit
 import Foundation
 import SezishAsr
 import SezishCore
+import os
+
+/// One line per start about the system stem: what it holds, and when the only
+/// thing left to hold is the whole Mac. Same subsystem as every other log.
+private let systemTapLog = Logger(subsystem: "com.smixs.sezish", category: "system-tap")
 
 /// Meeting recording lifecycle for `AppState`. Split out like AppState+Model to
 /// keep the state file on UI/hotkey wiring.
@@ -37,12 +42,13 @@ extension AppState {
         // Once, before a single sample is recorded: from here on the system stem
         // holds the call app's audio and not whatever else is playing. The mic
         // device (A4) and the file name (A7) read the same field later.
-        let callApp = resolveMeetingCallApp(source: source)
+        let snapshot = readProcessSnapshot()
+        let callApp = resolveMeetingCallApp(source: source, snapshot: snapshot)
         meetingCallApp = callApp
         let pipeline = makeMeetingTranscriptionPipeline()
         do {
             let outcome = try meetingRecorder.start(
-                scope: .forCallApp(callApp), pipeline: pipeline
+                coverage: tapCoverage(for: callApp, snapshot: snapshot), pipeline: pipeline
             )
             meetingTranscription = pipeline
             meetingWasAutoStarted = source.isAuto
@@ -285,16 +291,43 @@ extension AppState {
         )
     }
 
-    /// The pure decision lives in `SezishCore`; CoreAudio supplies the mic
+    /// One read of the process list for a whole start: the call app and the tap
+    /// coverage come from the same snapshot, because a second read a moment later
+    /// can name a process the first never saw. A read that fails leaves the meeting
+    /// recording the mic and every process — the degradation, with its cause logged.
+    private func readProcessSnapshot() -> AudioProcessSnapshot {
+        do {
+            return try AudioProcessSnapshot.read()
+        } catch {
+            systemTapLog.error(
+                "process list unreadable: \(error.localizedDescription, privacy: .public)"
+            )
+            return .empty
+        }
+    }
+
+    /// The pure decision lives in `SezishCore`; the snapshot supplies the mic
     /// holders and the detector supplies the app it saw.
-    private func resolveMeetingCallApp(source: MeetingStartSource) -> MeetingCallApp? {
+    private func resolveMeetingCallApp(
+        source: MeetingStartSource, snapshot: AudioProcessSnapshot
+    ) -> MeetingCallApp? {
         MeetingCallAppResolver.resolve(
-            source: source,
-            holders: AudioProcessList.activeInputHolders().map {
-                .init(bundleID: $0.bundleID, pid: $0.pid, isRunningOutput: $0.isRunningOutput)
-            },
-            policy: meetingPolicy
+            source: source, holders: snapshot.inputHolders, policy: meetingPolicy
         )
+    }
+
+    /// What the system stem holds for this start, and one line when that is the
+    /// whole Mac because the call app's family has nothing live to tap — the single
+    /// degradation this path allows (`.all` *is* that answer, so it gets no line).
+    private func tapCoverage(
+        for callApp: MeetingCallApp?, snapshot: AudioProcessSnapshot
+    ) -> TapCoverage {
+        let coverage = MeetingAudioScope.forCallApp(callApp).coverage(live: snapshot.tapCandidates)
+        guard coverage == .global, let callApp else { return coverage }
+        systemTapLog.notice(
+            "no live process in \(callApp.family, privacy: .public): recording all system audio"
+        )
+        return coverage
     }
 
     func stopMeetingRecording() {

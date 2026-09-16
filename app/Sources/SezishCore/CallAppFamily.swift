@@ -8,23 +8,28 @@ import Foundation
 /// Matching is case-insensitive, like `MeetingDetectionPolicy`: helper ids flip
 /// case against their main app.
 public enum CallAppFamily {
-    private static let helperMarker = ".helper"
+    /// The segment that marks a helper, not a substring: `com.helperbot.app` is
+    /// one app's name, not a helper of `com`.
+    private static let helperSegment: Substring = "helper"
 
     /// `com.google.Chrome.helper.Renderer` → `com.google.Chrome`; an id with no
-    /// `.helper` segment is its own family (`us.zoom.xos`). Lowercased, since
-    /// that is how families are compared. A marker with nothing in front of it
-    /// would leave nothing to match on, so such an id is kept whole.
+    /// `.helper` segment is its own family (`us.zoom.xos`). Lowercased, since that
+    /// is how families are compared. An id whose first segment is the marker
+    /// itself stays whole: an empty family would be a prefix of every app on the
+    /// Mac.
     public static func of(_ bundleID: String) -> String {
         let id = bundleID.lowercased()
-        guard let marker = id.range(of: helperMarker), marker.lowerBound != id.startIndex else {
-            return id
-        }
-        return String(id[..<marker.lowerBound])
+        let segments = id.split(separator: ".")
+        guard let marker = segments.firstIndex(of: helperSegment), marker > 0 else { return id }
+        return segments[..<marker].joined(separator: ".")
     }
 
-    /// True when `bundleID` is that app itself or any helper under it.
+    /// True when `bundleID` is that app itself or a helper under it — the same
+    /// segments `of` folds. `com.google.Chrome.canary` is a neighbour of Chrome and
+    /// not a helper of it, and the empty family belongs to nobody.
     public static func belongs(_ bundleID: String, to family: String) -> Bool {
-        bundleID.lowercased().hasPrefix(family.lowercased())
+        guard !family.isEmpty else { return false }
+        return of(bundleID) == family.lowercased()
     }
 }
 
@@ -48,6 +53,14 @@ public struct MeetingCallApp: Equatable, Sendable {
     public var scope: MeetingAudioScope { .family(family) }
 }
 
+/// What a process tap has to cover to hold a scope.
+public enum TapCoverage: Equatable, Sendable {
+    /// Everything that plays on the Mac.
+    case global
+    /// Only these CoreAudio process objects.
+    case processes([UInt32])
+}
+
 /// Where the system stem of a meeting comes from.
 public enum MeetingAudioScope: Equatable, Sendable {
     /// No call app was named: everything that plays is recorded, as before.
@@ -60,16 +73,17 @@ public enum MeetingAudioScope: Equatable, Sendable {
         callApp?.scope ?? .all
     }
 
-    /// What a process tap has to cover to hold exactly this scope.
-    public enum TapCoverage: Equatable, Sendable {
-        /// Everything that plays on the Mac.
-        case global
-        /// Only these CoreAudio process objects.
-        case processes([UInt32])
+    /// Which live processes a tap has to cover to hold exactly this scope. A
+    /// family with nothing running — or a process CoreAudio would not name — leaves
+    /// nothing to tap, and the whole Mac beats dropping the call: the one
+    /// degradation this path allows, and the caller logs it.
+    public func coverage(live: [(id: UInt32, bundleID: String?)]) -> TapCoverage {
+        guard case .family(let family) = self else { return .global }
+        let ids = live.filter { candidate in
+            candidate.bundleID.map { CallAppFamily.belongs($0, to: family) } ?? false
+        }.map { $0.id }
+        return ids.isEmpty ? .global : .processes(ids)
     }
-
-    // RED: surface only, the decision lands in the next commit.
-    public func coverage(live: [(id: UInt32, bundleID: String?)]) -> TapCoverage { .global }
 }
 
 /// What started a meeting recording.
@@ -121,10 +135,14 @@ public enum MeetingCallAppResolver {
         return MeetingCallApp(bundleID: bundleID, pid: pid, family: family)
     }
 
-    /// No detector answer, so the first mic holder the policy would record is
-    /// the call app — the same judgement the detector itself makes.
+    /// No detector answer, so the call app is the mic holder the policy would
+    /// record — the same judgement the detector itself makes. A holder that is also
+    /// playing audio comes first: a call is full-duplex, while an input-only holder
+    /// (a voice search, a recorder the deny list missed) renders no remote audio
+    /// for the tap to capture.
     private static func manual(holders: [Holder], policy: MeetingDetectionPolicy) -> MeetingCallApp? {
-        let chosen = holders.first { policy.classify($0.bundleID) == .record }
+        let recordable = holders.filter { policy.classify($0.bundleID) == .record }
+        let chosen = recordable.first { $0.isRunningOutput } ?? recordable.first
         return chosen.map {
             MeetingCallApp(bundleID: $0.bundleID, pid: $0.pid, family: CallAppFamily.of($0.bundleID))
         }

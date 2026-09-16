@@ -42,11 +42,11 @@ final class MeetingRecorder {
     }
 
     /// `pipeline` (optional) gets the same sample streams the stems spool, for
-    /// incremental transcription while the recording is still running. `scope`
-    /// decides whose audio the system stem holds: the call app's own processes
-    /// when one was identified, everything that plays otherwise.
+    /// incremental transcription while the recording is still running. `coverage`
+    /// decides whose audio the system stem holds: the call app's own processes, or
+    /// everything that plays when no app could be named.
     func start(
-        scope: MeetingAudioScope, pipeline: MeetingTranscriptionPipeline? = nil
+        coverage: TapCoverage, pipeline: MeetingTranscriptionPipeline? = nil
     ) throws -> StartOutcome {
         guard !isRecording else { return .full }
 
@@ -79,7 +79,7 @@ final class MeetingRecorder {
             pipeline?.ingestSystem($0)
         })
         do {
-            try tap.start(scope: scope)
+            try tap.start(coverage: coverage)
             self.tap = tap
             self.systemStem = systemStem
         } catch {
