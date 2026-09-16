@@ -48,6 +48,12 @@ final class MeetingRecorder {
     private var systemStem: MeetingStem?
     private var tempDir: URL?
     private(set) var startDate: Date?
+    /// The silence stop's per-track signals, fed from the audio callbacks.
+    private let micLoudness = MeetingLoudnessSignal()
+    private let systemLoudness = MeetingLoudnessSignal()
+    /// When the stop poll last looked at the signals; the first tick asks about
+    /// the whole recording so far.
+    private var loudnessPolledAt: Date?
 
     var isRecording: Bool { startDate != nil }
 
@@ -83,9 +89,11 @@ final class MeetingRecorder {
         )
 
         // Mic first: the user's own voice is the non-negotiable half.
+        let micLoudness = self.micLoudness
         let mic = makeMic(device) {
             micStem.ingest($0)
             pipeline?.ingestMic($0)
+            micLoudness.ingest($0)
         }
         do {
             try mic.start()
@@ -95,9 +103,11 @@ final class MeetingRecorder {
         }
 
         var outcome = StartOutcome.full
+        let systemLoudness = self.systemLoudness
         let tap = SystemAudioTap(onSamples16k: {
             systemStem.ingest($0)
             pipeline?.ingestSystem($0)
+            systemLoudness.ingest($0)
         })
         do {
             try tap.start(coverage: coverage)
@@ -115,7 +125,19 @@ final class MeetingRecorder {
         self.micStem = micStem
         self.tempDir = dir
         self.startDate = Date()
+        loudnessPolledAt = self.startDate
         return outcome
+    }
+
+    /// One stop-poll tick's input: whether each track held a speech frame since
+    /// the previous tick. Without a system stem the mic is the only track there
+    /// is, so it alone decides — a mic-only recording must still stop on silence.
+    func loudness(at now: Date) -> (mic: Bool, system: Bool) {
+        let since = loudnessPolledAt ?? now
+        loudnessPolledAt = now
+        let mic = micLoudness.isLoud(since: since)
+        guard tap != nil else { return (mic: mic, system: false) }
+        return (mic: mic, system: systemLoudness.isLoud(since: since))
     }
 
     func stop() async throws -> Capture {
@@ -165,5 +187,38 @@ final class MeetingRecorder {
         systemStem = nil
         tempDir = nil
         startDate = nil
+        loudnessPolledAt = nil
+        micLoudness.reset()
+        systemLoudness.reset()
+    }
+}
+
+/// One track's loudness for the silence stop. The realtime callback only folds
+/// samples into a 100 ms frame and stamps the last loud moment as a `Date`; the
+/// 1 Hz poll then asks whether that was since it last looked, so a poll that
+/// slips a beat still sees the track as alive.
+private nonisolated final class MeetingLoudnessSignal: @unchecked Sendable {
+    private let lock = NSLock()
+    private var meter = MeetingLoudnessMeter()
+    private var lastLoudAt: Date?
+
+    func ingest(_ samples16k: [Float]) {
+        lock.withLock {
+            if meter.append(samples16k) { lastLoudAt = Date() }
+        }
+    }
+
+    func isLoud(since previousTick: Date) -> Bool {
+        lock.withLock { lastLoudAt.map { $0 >= previousTick } ?? false }
+    }
+
+    /// Nothing of one take survives into the next: the recorder outlives every
+    /// recording, so a half-counted frame or a stale "loud" moment would otherwise
+    /// shift the start of the next take's silence window.
+    func reset() {
+        lock.withLock {
+            meter.reset()
+            lastLoudAt = nil
+        }
     }
 }

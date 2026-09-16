@@ -207,4 +207,28 @@ import Testing
         settings.geminiApiKey = "AIza-test"
         #expect(settings.effectiveTranscriptionMode == .gemini)
     }
+
+    /// The two hidden safety nets: minutes as `defaults write` stores them, 0 or
+    /// absent keeping the built-in default (there is no UI for them).
+    @Test func hiddenStopThresholdsDefaultToTenMinutesAndFiveHours() throws {
+        let suiteName = "sezish.tests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let settings = AppSettings(defaults: defaults, bakedCloud: nil)
+        #expect(settings.meetingSilenceStopAfter == 10 * 60)
+        #expect(settings.meetingMaxDurationAfter == 5 * 3_600)
+
+        defaults.set(1, forKey: "meetingSilenceStopMinutes")
+        defaults.set(90, forKey: "meetingMaxDurationMinutes")
+        let tuned = AppSettings(defaults: try #require(UserDefaults(suiteName: suiteName)), bakedCloud: nil)
+        #expect(tuned.meetingSilenceStopAfter == 60)
+        #expect(tuned.meetingMaxDurationAfter == 90 * 60)
+
+        // A zero — or a negative typo — is not "off": the nets keep their default.
+        defaults.set(0, forKey: "meetingSilenceStopMinutes")
+        defaults.set(-5, forKey: "meetingMaxDurationMinutes")
+        #expect(tuned.meetingSilenceStopAfter == 10 * 60)
+        #expect(tuned.meetingMaxDurationAfter == 5 * 3_600)
+    }
 }

@@ -144,7 +144,9 @@ public final class MeetingTranscriptionPipeline: @unchecked Sendable {
     /// than speech. At 16 kHz a frame is 1600 samples, so a 0.005 noise floor
     /// scores 1600·0.005² = 0.04 and a 0.05 voice scores 4.0 — an order of
     /// magnitude either side of this, so no plausible gain setting flips a verdict.
-    private static let speechFrameEnergy: Float = 0.4
+    /// Deliberately shared with the silence stop (`MeetingLoudnessMeter`): one
+    /// threshold, so a track is "loud" exactly when it would cost a model run.
+    static let speechFrameEnergy: Float = 0.4
 
     private let lock = NSLock()
     // One chunker and one clock per track, mutated in place: the structs share no
