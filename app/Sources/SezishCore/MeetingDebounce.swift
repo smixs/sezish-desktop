@@ -59,12 +59,6 @@ public struct MeetingDebounce: Sendable {
         state = .idle
     }
 
-    /// True once the debounce fired `.start` and before `.stop`.
-    public var isActive: Bool {
-        if case .active = state { return true }
-        return false
-    }
-
     /// Seconds since the candidate window opened; nil unless debouncing a start.
     public func candidateHeldSeconds(at now: Date) -> TimeInterval? {
         if case .candidate(let since) = state { return now.timeIntervalSince(since) }

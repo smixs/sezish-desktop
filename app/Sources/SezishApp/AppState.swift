@@ -14,6 +14,14 @@ final class AppState {
         case idle
         case recordingMeeting
         case processingMeeting
+
+        /// 1:1 translation for the detector decision; the decision itself —
+        /// what wins over what — lives in `MeetingDetectorStatus.resolve`.
+        var detectorAppStatus: MeetingAppStatus {
+            if self == .recordingMeeting { return .recording }
+            if self == .processingMeeting { return .processing }
+            return .idle
+        }
     }
 
     /// Lifecycle of the on-disk ASR model.
@@ -63,15 +71,25 @@ final class AppState {
     /// Mirror of `settings.autoRecordMeetings` (same observability reason).
     var autoRecordMeetings = false
 
-    /// What the detector thinks right now; drives the one-line "why not recording"
-    /// hint in the menu. Mirrored from `MeetingDetector.onStatus`.
-    var meetingDetectorStatus: MeetingDetectorStatus = .disabled
+    /// The detector's latest tick, as published; the decision itself is rebuilt
+    /// at render time, when the app status is known. Mirrored from
+    /// `MeetingDetector.onStatus`.
+    var meetingDetectorFacts: MeetingDetectorFacts?
 
-    /// One-line hint under the meeting button, or nil when there is nothing to say.
-    /// A live recording always reads as one; the "off" case is gated by the menu.
+    /// One-line hint under the meeting button; nil before the first tick. The
+    /// "off" case is gated by the menu (`autoRecordMeetings`).
     var detectorStatusLine: String? {
-        let status: MeetingDetectorStatus = isRecordingMeeting ? .recording : meetingDetectorStatus
-        return meetingStatusLine(status, text: strings.meetingStatusText)
+        guard let facts = meetingDetectorFacts else { return nil }
+        return meetingStatusLine(
+            MeetingDetectorStatus.resolve(
+                appStatus: status.detectorAppStatus,
+                debounce: facts.debounce,
+                candidateName: facts.candidateName,
+                deniedNames: facts.deniedNames,
+                at: facts.at
+            ),
+            text: strings.meetingStatusText
+        )
     }
 
     /// Mirror of `settings.playSounds` (same observability reason).

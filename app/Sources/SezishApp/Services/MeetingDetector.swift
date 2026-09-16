@@ -17,7 +17,9 @@ final class MeetingDetector {
     var onMeetingEnd: (() -> Void)?
     /// Fires after every tick with what the detector thinks right now; AppState
     /// mirrors it into the one-line "why not recording" menu hint.
-    var onStatus: ((MeetingDetectorStatus) -> Void) = { _ in }
+    /// That tick's facts; AppState stores them and rebuilds the decision at
+    /// render time, when the app status is known.
+    var onStatus: ((MeetingDetectorFacts) -> Void) = { _ in }
 
     private let policy: MeetingDetectionPolicy
     private var debounce = MeetingDebounce()
@@ -46,15 +48,16 @@ final class MeetingDetector {
         poll = nil
         debounce.reset()
         seenOutput.removeAll()
-        onStatus(.disabled)
     }
 
     private func tick() {
+        // One clock per tick: the debounce and the published facts share it.
+        let now = Date()
         let holders = AudioProcessList.activeInputHolders()
         noteOutput(holders: holders)
         let candidate = policy.candidate(among: duplexIDs(holders: holders))
-        let event = debounce.tick(externalMicActive: candidate != nil, at: Date())
-        publishStatus(holders: holders, candidate: candidate)
+        let event = debounce.tick(externalMicActive: candidate != nil, at: now)
+        publishStatus(holders: holders, candidate: candidate, at: now)
         handle(event: event, candidate: candidate, holdersEmpty: holders.isEmpty)
     }
 
@@ -93,23 +96,20 @@ final class MeetingDetector {
 
     private func publishStatus(
         holders: [AudioProcessList.MicHolder],
-        candidate: MeetingDetectionPolicy.Candidate?
+        candidate: MeetingDetectionPolicy.Candidate?,
+        at now: Date
     ) {
-        onStatus(MeetingDetectorStatus.resolve(
-            autoRecord: true,
+        onStatus(MeetingDetectorFacts(
             debounce: debounce,
-            candidateName: candidate.map { name(of: $0.bundleID, in: holders) },
-            deniedNames: holders.filter { policy.classify($0.bundleID) == .deny }
-                .map { AudioProcessList.displayName(of: $0) },
-            at: Date()
+            candidateName: candidate.flatMap { id in
+                holders.first(where: { $0.bundleID == id.bundleID })
+                    .map(AudioProcessList.displayName(of:))
+            },
+            deniedNames: policy.deniedNames(among: holders.map {
+                (bundleID: $0.bundleID, displayName: AudioProcessList.displayName(of: $0))
+            }),
+            at: now
         ))
-    }
-
-    private func name(of bundleID: String, in holders: [AudioProcessList.MicHolder]) -> String {
-        holders.first(where: { $0.bundleID == bundleID })
-            .map(AudioProcessList.displayName(of:))
-            ?? bundleID.components(separatedBy: ".").last
-            ?? bundleID
     }
 }
 

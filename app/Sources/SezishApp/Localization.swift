@@ -157,6 +157,7 @@ struct Strings {
     /// `%@` is the holder name, `%d` the seconds it holds the mic.
     let meetingStatusCandidate: String
     let meetingStatusRecording: String
+    let meetingStatusProcessing: String
     /// `%d` is the seconds of silence.
     let meetingStatusFading: String
 
@@ -221,6 +222,7 @@ extension Strings {
             denied: meetingStatusDenied,
             candidate: meetingStatusCandidate,
             recording: meetingStatusRecording,
+            processing: meetingStatusProcessing,
             fading: meetingStatusFading
         )
     }
@@ -338,6 +340,7 @@ extension Strings {
         meetingStatusDenied: "Микрофон занят: %@ — это не звонок",
         meetingStatusCandidate: "%@ держит микрофон %d с",
         meetingStatusRecording: "Идёт встреча",
+        meetingStatusProcessing: "Обрабатываю запись",
         meetingStatusFading: "Тихо уже %d с",
         notifModelMissing: "Модель ещё не скачана. Откройте меню sezish и нажмите «Скачать модель».",
         notifRecordFailed: "Не удалось начать запись. Проверьте доступ к микрофону.",
@@ -482,7 +485,8 @@ extension Strings {
         meetingStatusDenied: "Mikrofon band: %@ — bu qoʼngʼiroq emas",
         meetingStatusCandidate: "%@ mikrofonni %d s ushlab turibdi",
         meetingStatusRecording: "Uchrashuv yozilmoqda",
-        meetingStatusFading: "Tinchlik %d s davom etyapti",
+        meetingStatusProcessing: "Yozuv qayta ishlanmoqda",
+        meetingStatusFading: "%d sdan beri jimlik",
         notifModelMissing: "Model hali yuklab olinmagan. sezish menyusida «Modelni yuklab olish»ni bosing.",
         notifRecordFailed: "Yozishni boshlab boʼlmadi. Mikrofon ruxsatini tekshiring.",
         notifNoText: "Matn aniqlanmadi. Audio saqlandi, sezish menyusidan qayta aniqlash mumkin.",
