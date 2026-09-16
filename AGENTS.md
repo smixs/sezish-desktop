@@ -8,7 +8,7 @@ This file is the canonical index for agents. There is no `CLAUDE.md` in this rep
 
 | Part | What it is | Stack | Version | Tests |
 |---|---|---|---|---|
-| `app/` | macOS menu-bar app. **Reference implementation** — behavior and constants come from here | Swift 6 / SwiftUI, plain SPM + Makefile | 0.1.14 (build 15) | 297+ (Swift Testing) |
+| `app/` | macOS menu-bar app. **Reference implementation** — behavior and constants come from here | Swift 6 / SwiftUI, plain SPM + Makefile | 0.1.19 (build 20) | 383 (Swift Testing) |
 | `win/` | Windows dictation port, early beta | Tauri v2 (=2.11.5) + Rust workspace | 0.1.7 in code, not yet built (own version line, ADR-0015) | 130 |
 | `./sezish` | CLI meeting transcriber, single-file Python (`uv run --script`) | onnx-asr + Silero VAD, CPU only | shipped via `install.sh` | — |
 | `docs/` | ADRs, Windows-port research | — | — | — |
