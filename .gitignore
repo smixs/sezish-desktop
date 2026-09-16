@@ -7,3 +7,5 @@ cloud/.api-key
 implementation-notes.md
 __pycache__/
 workbench.md
+.scratch/
+.worktrees/
