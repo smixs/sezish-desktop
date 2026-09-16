@@ -141,6 +141,8 @@ struct Strings {
     /// details — the file is where they live.
     let notifSummaryFailed: String
     let meetingDocTitle: String
+    /// `%@` is the call app's display name ("Звонок в Telegram").
+    let meetingDocTitleApp: String
     let meetingDocDuration: String
     /// Italic banner under the title of a salvaged meeting's transcript.
     let meetingDocRecovered: String
@@ -309,6 +311,7 @@ extension Strings {
         notifSummaryReady: "Саммари встречи готово",
         notifSummaryFailed: "Саммари не получилось — детали в summary.log",
         meetingDocTitle: "Запись звонка",
+        meetingDocTitleApp: "Звонок в %@",
         meetingDocDuration: "Длительность",
         meetingDocRecovered: "Восстановлено после сбоя",
         meetingDocEngine: "Распознано локально на устройстве",
@@ -448,6 +451,7 @@ extension Strings {
         notifSummaryReady: "Uchrashuv xulosasi tayyor",
         notifSummaryFailed: "Xulosa chiqmadi — batafsil summary.log faylida",
         meetingDocTitle: "Qoʼngʼiroq yozuvi",
+        meetingDocTitleApp: "%@ qoʼngʼirogʼi",
         meetingDocDuration: "Davomiyligi",
         meetingDocRecovered: "Nosozlikdan keyin tiklangan yozuv",
         meetingDocEngine: "Matn qurilmaning oʼzida aniqlangan",
