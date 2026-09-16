@@ -307,13 +307,17 @@ extension AppState {
     }
 
     /// The pure decision lives in `SezishCore`; the snapshot supplies the mic
-    /// holders and the detector supplies the app it saw.
+    /// holders and the detector supplies the app it saw. The display name is
+    /// snapshotted here, once, while the process is known alive — a pid read
+    /// after the recording may be dead or handed to another app by then.
     private func resolveMeetingCallApp(
         source: MeetingStartSource, snapshot: AudioProcessSnapshot
     ) -> MeetingCallApp? {
         MeetingCallAppResolver.resolve(
             source: source, holders: snapshot.inputHolders, policy: meetingPolicy
-        )
+        ) { pid in
+            pid.flatMap { NSRunningApplication(processIdentifier: $0)?.localizedName }
+        }
     }
 
     /// What the system stem holds for this start, and one line when that is the
@@ -588,7 +592,7 @@ extension AppState {
     ) -> String {
         let stamp = meetingDateStamp(language: language, date: date)
         if let callApp {
-            return "# \(String(format: strings.meetingDocTitleApp, callApp)), \(stamp)\n\n"
+            return "# \(String(format: strings.meetingDocTitleApp, callApp)) - \(stamp)\n\n"
         }
         return "# \(strings.meetingDocTitle) - \(stamp)\n\n"
     }
@@ -629,14 +633,5 @@ extension AppState {
         md += transcript ?? "_\(strings.notifMeetingNoTranscript)_"
         md += "\n"
         return md
-    }
-}
-
-extension MeetingCallApp {
-    /// Only AppKit can turn a pid into a name, so the lookup lives here while the
-    /// choice of *whose* pid stays pure (`MeetingCallAppResolver`). A process that
-    /// quit since the meeting started simply has no name.
-    var displayName: String? {
-        pid.flatMap { NSRunningApplication(processIdentifier: $0)?.localizedName }
     }
 }

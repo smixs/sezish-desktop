@@ -65,10 +65,10 @@ public enum MeetingFileNamer {
 
     /// What may follow the minute: nothing, one collision number or slug, or a
     /// slug with its collision number. A number first is never a slug — slugs
-    /// always carry a letter — so `call-…-33-2-3` stays unreadable.
+    /// always carry a letter — so `call-…-33-2-3` stays unreadable. Only called
+    /// with 0...2 elements (the caller guards the part count first).
     private static func tailIsValid(_ tail: [Substring]) -> Bool {
         if tail.isEmpty { return true }
-        if tail.count > 2 { return false }
         if tail.count == 2 { return pairTailIsValid(tail[0], tail[1]) }
         return singleTailIsValid(tail[0])
     }
