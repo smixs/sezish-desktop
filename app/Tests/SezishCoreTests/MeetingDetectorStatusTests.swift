@@ -10,15 +10,23 @@ struct MeetingDetectorStatusTests {
             denied: "Микрофон занят: %@ — это не звонок",
             candidate: "%@ держит микрофон %d с",
             recording: "Идёт встреча",
+            processing: "Обрабатываю запись",
             fading: "Тихо уже %d с"
         )
+    }
+
+    private func startedDebounce() -> MeetingDebounce {
+        var debounce = MeetingDebounce(startAfter: 2, stopAfter: 10)
+        _ = debounce.tick(externalMicActive: true, at: t0)
+        _ = debounce.tick(externalMicActive: true, at: t0 + 2)
+        return debounce
     }
 
     @Test func telegramHoldingOneOfTwoSecondsIsCandidate() {
         var debounce = MeetingDebounce(startAfter: 2, stopAfter: 10)
         _ = debounce.tick(externalMicActive: true, at: t0)
         let status = MeetingDetectorStatus.resolve(
-            autoRecord: true, debounce: debounce,
+            appStatus: .idle, debounce: debounce,
             candidateName: "Telegram", deniedNames: [], at: t0 + 1)
         #expect(status == .candidate(name: "Telegram", seconds: 1))
         #expect(meetingStatusLine(status, text: ru) == "Telegram держит микрофон 1 с")
@@ -28,7 +36,7 @@ struct MeetingDetectorStatusTests {
         var debounce = MeetingDebounce(startAfter: 2, stopAfter: 10)
         _ = debounce.tick(externalMicActive: false, at: t0)
         let status = MeetingDetectorStatus.resolve(
-            autoRecord: true, debounce: debounce,
+            appStatus: .idle, debounce: debounce,
             candidateName: nil, deniedNames: ["Handy"], at: t0)
         #expect(status == .denied(names: ["Handy"]))
         #expect(meetingStatusLine(status, text: ru) == "Микрофон занят: Handy — это не звонок")
@@ -38,30 +46,38 @@ struct MeetingDetectorStatusTests {
         var debounce = MeetingDebounce(startAfter: 2, stopAfter: 10)
         _ = debounce.tick(externalMicActive: false, at: t0)
         let status = MeetingDetectorStatus.resolve(
-            autoRecord: true, debounce: debounce,
+            appStatus: .idle, debounce: debounce,
             candidateName: nil, deniedNames: [], at: t0)
         #expect(status == .ready)
         #expect(meetingStatusLine(status, text: ru) == "Готов, жду звонок")
     }
 
-    @Test func disabledToggleYieldsNoLine() {
-        let debounce = MeetingDebounce(startAfter: 2, stopAfter: 10)
+    @Test func idleWithActiveDebounceIsNotRecording() {
+        // Manual stop, failed start, gated auto-start: the mic is still held,
+        // but nothing records — and the line must not claim otherwise.
         let status = MeetingDetectorStatus.resolve(
-            autoRecord: false, debounce: debounce,
-            candidateName: "Telegram", deniedNames: [], at: t0)
-        #expect(status == .disabled)
-        #expect(meetingStatusLine(status, text: ru) == nil)
+            appStatus: .idle, debounce: startedDebounce(),
+            candidateName: "Telegram", deniedNames: [], at: t0 + 60)
+        #expect(status == .ready)
+        #expect(meetingStatusLine(status, text: ru) == "Готов, жду звонок")
     }
 
-    @Test func activeDebounceIsRecording() {
-        var debounce = MeetingDebounce(startAfter: 2, stopAfter: 10)
-        _ = debounce.tick(externalMicActive: true, at: t0)
-        _ = debounce.tick(externalMicActive: true, at: t0 + 2)
+    @Test func recordingStatusWinsOverDebounce() {
         let status = MeetingDetectorStatus.resolve(
-            autoRecord: true, debounce: debounce,
-            candidateName: "Telegram", deniedNames: [], at: t0 + 3)
+            appStatus: .recording, debounce: startedDebounce(),
+            candidateName: "Telegram", deniedNames: [], at: t0 + 60)
         #expect(status == .recording)
         #expect(meetingStatusLine(status, text: ru) == "Идёт встреча")
+    }
+
+    @Test func processingStatusShowsProgress() {
+        var debounce = MeetingDebounce(startAfter: 2, stopAfter: 10)
+        _ = debounce.tick(externalMicActive: false, at: t0)
+        let status = MeetingDetectorStatus.resolve(
+            appStatus: .processing, debounce: debounce,
+            candidateName: nil, deniedNames: [], at: t0)
+        #expect(status == .processing)
+        #expect(meetingStatusLine(status, text: ru) == "Обрабатываю запись")
     }
 
     @Test func quietCallIsFading() {
@@ -70,9 +86,31 @@ struct MeetingDetectorStatusTests {
         _ = debounce.tick(externalMicActive: true, at: t0 + 2)
         _ = debounce.tick(externalMicActive: false, at: t0 + 5)
         let status = MeetingDetectorStatus.resolve(
-            autoRecord: true, debounce: debounce,
+            appStatus: .idle, debounce: debounce,
             candidateName: nil, deniedNames: [], at: t0 + 9)
         #expect(status == .fading(seconds: 4))
         #expect(meetingStatusLine(status, text: ru) == "Тихо уже 4 с")
+    }
+}
+
+struct MeetingDeniedNamesTests {
+    private let policy = MeetingDetectionPolicy(ownBundleID: "com.smixs.sezish")
+
+    @Test func ownProcessIsFilteredOut() {
+        let holders = [
+            (bundleID: "com.smixs.sezish", displayName: "sezish"),
+            (bundleID: "cc.handy", displayName: "Handy"),
+            (bundleID: "us.zoom.xos", displayName: "zoom.us"),
+        ]
+        #expect(policy.deniedNames(among: holders) == ["Handy"])
+    }
+
+    @Test func duplicateNamesCollapseToOne() {
+        let holders = [
+            (bundleID: "com.anthropic.claudefordesktop", displayName: "Claude"),
+            (bundleID: "com.anthropic.claudefordesktop.helper", displayName: "Claude"),
+            (bundleID: "com.anthropic.claudefordesktop.helper.GPU", displayName: "Claude"),
+        ]
+        #expect(policy.deniedNames(among: holders) == ["Claude"])
     }
 }
