@@ -8,6 +8,7 @@ import os
 /// One line per meeting start about the system stem — what it holds, and when the
 /// only thing left to hold is the whole Mac. Same subsystem as every other log.
 private let systemTapLog = Logger(subsystem: "com.smixs.sezish", category: "system-tap")
+private let meetingStopLog = Logger(subsystem: "com.smixs.sezish", category: "meeting-stop")
 
 /// Meeting recording lifecycle for `AppState`. Split out like AppState+Model to
 /// keep the state file on UI/hotkey wiring.
@@ -445,6 +446,9 @@ extension AppState {
     /// say why.
     func stopMeetingRecording(reason: MeetingStopReason) {
         guard status == .recordingMeeting else { return }
+        // "Why did it stop" is otherwise unanswerable after the fact (smoke 16.09.2026:
+        // a take ended at 17 s with no trace of which rule fired).
+        meetingStopLog.notice("meeting stop: \(String(describing: reason), privacy: .public)")
         // A silence stop leaves the call app holding the mic, so the detector's
         // debounce stays `.active` and the next call in that app would never start a
         // recording. Re-arming it is safe because a silence-stopped take with no
