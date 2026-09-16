@@ -109,6 +109,7 @@ public enum MeetingTranscriptionRule {
     public static func discardsAudio(
         duration: TimeInterval, stopReason: MeetingStopReason
     ) -> Bool {
-        false
+        guard stopReason.isSilenceStop else { return false }
+        return !shouldTranscribe(duration: duration, stopReason: stopReason)
     }
 }

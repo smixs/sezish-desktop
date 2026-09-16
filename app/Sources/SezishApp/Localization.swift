@@ -184,8 +184,13 @@ struct Strings {
     /// Carries a `%d`: minutes of both-track silence that ended the recording by
     /// itself, so the user learns why the take stopped without them.
     let notifStoppedBySilence: String
-    /// Carries a `%d`: hours before the ceiling ended the recording.
+    /// Carries a `%@`: the ceiling in the units `MeetingStopBanner` picked, e.g.
+    /// "1 ч 30 мин" — never rounded to whole hours.
     let notifStoppedByCeiling: String
+    /// Carries a `%d`: whole hours of the ceiling, as one part of it.
+    let notifCeilingHours: String
+    /// Carries a `%d`: the minute part of the ceiling.
+    let notifCeilingMinutes: String
 
     // Settings: history
     /// Pane title in the settings sidebar.
@@ -365,7 +370,9 @@ extension Strings {
         notifMeetingRetryHint: "Распознать заново: меню sezish.",
         notifMeetingPartial: "Распознано частично. Аудио сохранено, можно распознать заново.",
         notifStoppedBySilence: "Запись остановлена: %d мин тишины.",
-        notifStoppedByCeiling: "Запись остановлена: достигнут предел %d ч.",
+        notifStoppedByCeiling: "Запись остановлена: достигнут предел %@.",
+        notifCeilingHours: "%d ч",
+        notifCeilingMinutes: "%d мин",
         paneHistory: "История",
         historyMeetings: "Встречи",
         revealFile: "Показать",
@@ -512,8 +519,10 @@ extension Strings {
         meetingsPending: "Matnsiz uchrashuvlar: %d",
         notifMeetingRetryHint: "Qayta aniqlash: sezish menyusi.",
         notifMeetingPartial: "Qisman aniqlandi. Audio saqlandi, qayta aniqlash mumkin.",
-        notifStoppedBySilence: "Yozuv toʼxtatildi: %d daqiqa sukunat.",
-        notifStoppedByCeiling: "Yozuv toʼxtatildi: %d soatlik chegaraga yetdi.",
+        notifStoppedBySilence: "Yozuv toʼxtatildi: %d daqiqa sukunatdan soʼng.",
+        notifStoppedByCeiling: "Yozuv toʼxtatildi: %@ chegarasiga yetdi.",
+        notifCeilingHours: "%d soat",
+        notifCeilingMinutes: "%d daqiqa",
         paneHistory: "Tarix",
         historyMeetings: "Uchrashuvlar",
         revealFile: "Koʼrsatish",

@@ -26,13 +26,29 @@ public enum MeetingStopReason: Equatable, Sendable {
     /// True for the stop the silence net causes — the only one the detector has to
     /// be re-armed after, and the only one that may throw a take away.
     public var isSilenceStop: Bool {
-        false
+        if case .silence = self { true } else { false }
     }
 
     /// The units of the "the recording stopped itself" banner, or nil for the
     /// stops that need no announcement (the user's own, and the detector's).
     public var banner: MeetingStopBanner? {
-        nil
+        switch self {
+        case .silence(let seconds): return .silence(minutes: Int(seconds) / 60)
+        case .ceiling(let seconds): return Self.ceilingBanner(seconds)
+        case .callEnded, .manual: return nil
+        }
+    }
+
+    /// The ceiling's parts with the zero ones dropped, so the default five hours
+    /// reads as "5 ч" and a hand-tuned 90 minutes keeps its half hour. A ceiling
+    /// under a minute (the hidden setting, hand-tuned) reads as one minute rather
+    /// than nothing at all.
+    private static func ceilingBanner(_ seconds: TimeInterval) -> MeetingStopBanner {
+        let total = max(1, Int(seconds) / 60)
+        return .ceiling(
+            hours: total / 60 > 0 ? total / 60 : nil,
+            minutes: total % 60 > 0 ? total % 60 : nil
+        )
     }
 }
 
@@ -141,5 +157,8 @@ public struct MeetingLoudnessMeter: Sendable {
 
     /// Forget the half-counted frame: the next take's first samples are its own,
     /// not the tail of a recording that ended minutes ago.
-    public mutating func reset() {}
+    public mutating func reset() {
+        energy = 0
+        frame = 0
+    }
 }

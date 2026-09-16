@@ -134,29 +134,36 @@ extension AppState {
                 micLoud: loudness.mic, systemLoud: loudness.system, at: now
             )
         else { return }
-        notifyMeetingStopped(reason)
         stopMeetingRecording(reason: reason)
     }
 
-    /// The app ended this recording on its own, so it owes the user a reason. A
-    /// manual stop and the detector's stop are silent: nobody is surprised.
+    /// The app ended this recording on its own, so it owes the user a reason — but
+    /// only once the take is on disk: a silence stop with no meeting in it is
+    /// thrown away whole (`MeetingTranscriptionRule.discardsAudio`), and announcing
+    /// a recording nobody will ever hear would be a lie. Which units the banner
+    /// speaks is `SezishCore`'s call (`MeetingStopReason.banner`).
     private func notifyMeetingStopped(_ reason: MeetingStopReason) {
-        switch reason {
-        case .silence(let seconds):
-            notifier.notify(
-                title: "sezish",
-                body: String(format: strings.notifStoppedBySilence, Int(seconds) / 60)
-            )
-        case .ceiling(let seconds):
-            // A ceiling set below an hour (hidden setting, hand-tuned) still reads
-            // as an hour: "предел 0 ч" would be nonsense.
-            notifier.notify(
-                title: "sezish",
-                body: String(format: strings.notifStoppedByCeiling, max(1, Int(seconds) / 3_600))
-            )
-        case .manual, .callEnded:
-            return
+        guard let banner = reason.banner else { return }
+        notifier.notify(title: "sezish", body: stopBannerBody(banner))
+    }
+
+    /// The banner for a stop the user did not ask for. A manual stop and the
+    /// detector's own need no announcement, and `banner` excludes them already.
+    private func stopBannerBody(_ banner: MeetingStopBanner) -> String {
+        switch banner {
+        case .silence(let minutes):
+            return String(format: strings.notifStoppedBySilence, minutes)
+        case .ceiling(let hours, let minutes):
+            return String(format: strings.notifStoppedByCeiling, ceilingParts(hours, minutes))
         }
+    }
+
+    /// "5 ч", "1 ч 30 мин", "30 мин": the ceiling as words, with the parts Core kept.
+    private func ceilingParts(_ hours: Int?, _ minutes: Int?) -> String {
+        [hours.map { String(format: strings.notifCeilingHours, $0) },
+         minutes.map { String(format: strings.notifCeilingMinutes, $0) }]
+            .compactMap { $0 }
+            .joined(separator: " ")
     }
 
     /// Meetings transcribe with the LOCAL model, PERIOD — never the cloud:
@@ -440,6 +447,12 @@ extension AppState {
     /// say why.
     func stopMeetingRecording(reason: MeetingStopReason) {
         guard status == .recordingMeeting else { return }
+        // A silence stop leaves the call app holding the mic, so the detector's
+        // debounce stays `.active` and the next call in that app would never start a
+        // recording. Re-arming it is safe because a silence-stopped take with no
+        // meeting in it is deleted whole, so the loop "record, go quiet, stop"
+        // cannot leave orphans behind.
+        if reason.isSilenceStop { meetingDetector?.rearm() }
         // The nets die with the recording — a stop is a stop, whoever asked for it,
         // and the poll must not fire again while the take is being mixed down.
         meetingAutoStop = nil
@@ -460,6 +473,7 @@ extension AppState {
         }
         do {
             let capture = try await meetingRecorder.stop()
+            guard keepTake(capture, stopReason: reason) else { return }
             await runMeetingPipeline(capture, stopReason: reason)
         } catch {
             meetingTranscription?.cancel()
@@ -472,18 +486,6 @@ extension AppState {
     private func runMeetingPipeline(
         _ capture: MeetingRecorder.Capture, stopReason: MeetingStopReason
     ) async {
-        let dir = MeetingRecorder.meetingsDirectory
-        let startedAt = meetingStartDate ?? Date().addingTimeInterval(-capture.duration)
-        // The file name reads where the call was: the same call app the system
-        // stem was scoped to at the start (A1), slugged by the namer.
-        let base = MeetingFileNamer.uniqueBaseName(
-            for: startedAt, app: meetingCallApp?.displayName
-        ) {
-            MeetingSalvage.nameIsTaken($0, in: dir)
-        }
-    /// Audio lands on disk FIRST (the take must survive any transcription
-    /// failure), then the transcript .md joins it.
-    private func runMeetingPipeline(_ capture: MeetingRecorder.Capture) async {
         let dir = MeetingRecorder.meetingsDirectory
         let fm = FileManager.default
         let startedAt = meetingStartDate ?? Date().addingTimeInterval(-capture.duration)
@@ -544,6 +546,75 @@ extension AppState {
         notifier.notify(title: "sezish", body: meetingNotificationBody(transcript))
         pendingMeetings = MeetingSalvage.discoverStems(in: dir)
         refreshMeetings()
+    }
+
+    /// A take the silence net ended with no meeting in it leaves nothing at all: no
+    /// audio, no .md, no banner — that is the only case where the app throws recorded
+    /// audio away (`MeetingTranscriptionRule.discardsAudio`). Checked before a single
+    /// byte is written. Answers whether there is anything left to work on.
+    private func keepTake(
+        _ capture: MeetingRecorder.Capture, stopReason: MeetingStopReason
+    ) -> Bool {
+        guard MeetingTranscriptionRule.discardsAudio(
+            duration: capture.duration, stopReason: stopReason
+        ) else {
+            // The take is a take: the user is told why the app stopped it, in the
+            // units `SezishCore` chose for that reason.
+            notifyMeetingStopped(stopReason)
+            return true
+        }
+        meetingTranscription?.cancel()
+        try? FileManager.default.removeItem(at: capture.tempDir)
+        return false
+    }
+
+    /// What the take produced: the rendered transcript, the line explaining a
+    /// missing one, and whether anything in it is still unrecognised.
+    private struct MeetingTranscript {
+        let text: String?
+        let failureDetail: String?
+        let needsRetry: Bool
+    }
+
+    /// Chunks were transcribed live during the recording, so this only drains the
+    /// tail and returns within seconds even for long calls. One paragraph per ~30 s
+    /// chunk, prefixed with its recording-relative timestamp and — when both tracks
+    /// were recorded — with who spoke; a jump in timestamps means a silent stretch.
+    ///
+    /// Unrecognised text in the take keeps it retryable, and that is deliberately
+    /// not `text == nil`: a silent meeting will never produce words and would then
+    /// offer itself for a retry forever. A missing local model is the other hole,
+    /// and meetings NEVER go to the cloud to fill it (see
+    /// makeMeetingTranscriptionPipeline).
+    private func meetingTranscript() async -> MeetingTranscript {
+        guard let pipeline = meetingTranscription else {
+            return MeetingTranscript(
+                text: nil, failureDetail: strings.notifModelMissing, needsRetry: true
+            )
+        }
+        let segments = await pipeline.finish()
+        return MeetingTranscript(
+            text: TranscriptSegment.render(
+                segments,
+                meLabel: strings.meetingSpeakerMe,
+                themLabel: strings.meetingSpeakerThem
+            ),
+            failureDetail: nil,
+            needsRetry: pipeline.failedChunkCount > 0
+        )
+    }
+
+    /// The banner for the take that just ended: holes and a missing transcript all
+    /// point at the retry, a finished one says so.
+    private func meetingNotificationBody(_ transcript: MeetingTranscript) -> String {
+        guard transcript.needsRetry else {
+            return transcript.text != nil
+                ? strings.notifTranscriptReady
+                : strings.notifMeetingNoTranscript
+        }
+        return retryNotification(
+            hasText: transcript.text != nil, failureDetail: transcript.failureDetail
+        )
     }
 
     /// A take that still has unrecognised text in it: the failure detail when there

@@ -188,6 +188,8 @@ final class MeetingRecorder {
         tempDir = nil
         startDate = nil
         loudnessPolledAt = nil
+        micLoudness.reset()
+        systemLoudness.reset()
     }
 }
 
@@ -208,5 +210,15 @@ private nonisolated final class MeetingLoudnessSignal: @unchecked Sendable {
 
     func isLoud(since previousTick: Date) -> Bool {
         lock.withLock { lastLoudAt.map { $0 >= previousTick } ?? false }
+    }
+
+    /// Nothing of one take survives into the next: the recorder outlives every
+    /// recording, so a half-counted frame or a stale "loud" moment would otherwise
+    /// shift the start of the next take's silence window.
+    func reset() {
+        lock.withLock {
+            meter.reset()
+            lastLoudAt = nil
+        }
     }
 }
