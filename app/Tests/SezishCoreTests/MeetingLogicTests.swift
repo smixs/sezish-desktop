@@ -539,3 +539,30 @@ struct PlaySoundsSettingTests {
         #expect(settings.playSounds == false)
     }
 }
+
+struct MeetingCallAppDisplayNameTests {
+    private let policy = MeetingDetectionPolicy(ownBundleID: "com.smixs.sezish")
+
+    /// The AppKit lookup is the caller's input: whatever it returns lands in
+    /// the app as is, so the name is snapshotted once while the process lives.
+    @Test func displayNamePassesThroughAsIs() {
+        let app = MeetingCallAppResolver.resolve(
+            source: .auto(bundleID: "us.zoom.xos"),
+            holders: [.init(bundleID: "us.zoom.xos", pid: 8, isRunningOutput: true)],
+            policy: policy,
+            displayName: { _ in "Telegram" }
+        )
+        #expect(app?.displayName == "Telegram")
+    }
+
+    @Test func vanishedProcessLeavesNoDisplayName() {
+        let app = MeetingCallAppResolver.resolve(
+            source: .manual,
+            holders: [.init(bundleID: "us.zoom.xos", pid: 8, isRunningOutput: true)],
+            policy: policy,
+            displayName: { _ in nil }
+        )
+        #expect(app?.bundleID == "us.zoom.xos")
+        #expect(app?.displayName == nil)
+    }
+}

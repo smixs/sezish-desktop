@@ -108,3 +108,26 @@ import Testing
         #expect(entries.allSatisfy { $0.date == expected })
     }
 }
+
+/// First line of the meeting document: with a known call app it names it.
+@MainActor // `Strings.ru` reads synchronously: the app target is MainActor-by-default.
+@Suite struct MeetingTitleTests {
+    @Test func titleNamesTheCallApp() {
+        let at = Date(timeIntervalSinceReferenceDate: 0)
+        let ru = AppState.meetingTitle(strings: .ru, language: .ru, date: at, callApp: "Telegram")
+        #expect(ru.hasPrefix("# Звонок в Telegram - "))
+        let uz = AppState.meetingTitle(strings: .uz, language: .uz, date: at, callApp: "Telegram")
+        #expect(uz.hasPrefix("# Telegram qoʼngʼirogʼi - "))
+        // No app (a salvaged meeting, an unknown process): the plain title, as before.
+        let plain = AppState.meetingTitle(strings: .ru, language: .ru, date: at, callApp: nil)
+        #expect(plain.hasPrefix("# Запись звонка - "))
+    }
+
+    @Test func markdownCarriesTheCallAppIntoItsTitle() {
+        let md = AppState.meetingMarkdown(
+            strings: .ru, language: .ru, date: Date(timeIntervalSinceReferenceDate: 0),
+            duration: 61, audioFile: "call.m4a", transcript: "x", callApp: "Telegram"
+        )
+        #expect(md.hasPrefix("# Звонок в Telegram - "))
+    }
+}

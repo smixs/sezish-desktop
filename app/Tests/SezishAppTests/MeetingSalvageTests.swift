@@ -620,18 +620,3 @@ private final class OddCallFailingTranscriber: Transcriber, @unchecked Sendable 
         #expect(!FileManager.default.fileExists(atPath: stems.path))
     }
 }
-
-/// First line of the meeting document: with a known call app it names it.
-@MainActor // `Strings.ru` reads synchronously, like in `MeetingSalvageTests`.
-@Suite struct MeetingTitleTests {
-    @Test func titleNamesTheCallApp() {
-        let at = Date(timeIntervalSinceReferenceDate: 0)
-        let ru = AppState.meetingTitle(strings: .ru, language: .ru, date: at, callApp: "Telegram")
-        #expect(ru.hasPrefix("# Звонок в Telegram, "))
-        let uz = AppState.meetingTitle(strings: .uz, language: .uz, date: at, callApp: "Telegram")
-        #expect(uz.hasPrefix("# Telegram qoʼngʼirogʼi, "))
-        // No app (a salvaged meeting, an unknown process): the plain title, as before.
-        let plain = AppState.meetingTitle(strings: .ru, language: .ru, date: at, callApp: nil)
-        #expect(plain.hasPrefix("# Запись звонка - "))
-    }
-}
