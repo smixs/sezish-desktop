@@ -42,8 +42,12 @@ final class MeetingRecorder {
     }
 
     /// `pipeline` (optional) gets the same sample streams the stems spool, for
-    /// incremental transcription while the recording is still running.
-    func start(pipeline: MeetingTranscriptionPipeline? = nil) throws -> StartOutcome {
+    /// incremental transcription while the recording is still running. `scope`
+    /// decides whose audio the system stem holds: the call app's own processes
+    /// when one was identified, everything that plays otherwise.
+    func start(
+        scope: MeetingAudioScope, pipeline: MeetingTranscriptionPipeline? = nil
+    ) throws -> StartOutcome {
         guard !isRecording else { return .full }
 
         let dir = Self.meetingsDirectory
@@ -75,17 +79,19 @@ final class MeetingRecorder {
             pipeline?.ingestSystem($0)
         })
         do {
-            try tap.start()
+            try tap.start(scope: scope)
             self.tap = tap
+            self.systemStem = systemStem
         } catch {
+            // Mic survives without the system half: a one-sided record beats none.
             outcome = .micOnly(error)
             self.tap = nil
+            self.systemStem = nil
             pipeline?.systemStreamUnavailable()
         }
 
         self.mic = mic
         self.micStem = micStem
-        self.systemStem = self.tap != nil ? systemStem : nil
         self.tempDir = dir
         self.startDate = Date()
         return outcome

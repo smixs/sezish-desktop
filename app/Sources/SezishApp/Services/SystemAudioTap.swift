@@ -1,8 +1,11 @@
+import os
 @preconcurrency import AVFoundation
 import AudioToolbox
 import Foundation
+import SezishCore
 
-// Captures the global system-audio mixdown via a Core Audio process tap.
+// Captures system audio via a Core Audio process tap: the call app's own
+// processes when one is known, the global mixdown otherwise.
 // Adapted from insidegui/AudioCap (https://github.com/insidegui/AudioCap,
 // BSD-2-Clause license). The first `start()` triggers the system's
 // "System Audio Recording" TCC prompt (usage string is in Info.plist).
@@ -29,6 +32,7 @@ enum SystemAudioTapError: LocalizedError {
 nonisolated final class SystemAudioTap: @unchecked Sendable {
     private let onSamples16k: @Sendable ([Float]) -> Void
     private let queue = DispatchQueue(label: "com.smixs.sezish.system-tap", qos: .userInitiated)
+    private let logger = Logger(subsystem: "com.smixs.sezish", category: "system-tap")
 
     private var tapID: AudioObjectID = kAudioObjectUnknown
     private var tapUUID = UUID()
@@ -44,8 +48,8 @@ nonisolated final class SystemAudioTap: @unchecked Sendable {
         self.onSamples16k = onSamples16k
     }
 
-    func start() throws {
-        try queue.sync { try startOnQueue() }
+    func start(scope: MeetingAudioScope) throws {
+        try queue.sync { try startOnQueue(scope: scope) }
     }
 
     func stop() {
@@ -54,11 +58,11 @@ nonisolated final class SystemAudioTap: @unchecked Sendable {
 
     // MARK: - On queue
 
-    private func startOnQueue() throws {
+    private func startOnQueue(scope: MeetingAudioScope) throws {
         guard !running else { return }
 
-        // 1. Global mono mixdown tap over every process (TCC prompt on first use).
-        let description = CATapDescription(monoGlobalTapButExcludeProcesses: [])
+        // 1. Mono mixdown tap over the requested scope (TCC prompt on first use).
+        let description = makeTapDescription(for: scope)
         description.uuid = UUID()
         description.muteBehavior = .unmuted
         description.isPrivate = true
@@ -68,22 +72,10 @@ nonisolated final class SystemAudioTap: @unchecked Sendable {
         tapID = newTapID
         tapUUID = description.uuid
 
-        // 2. Converter from the tap's native format to 16 kHz mono.
-        var streamDescription = try tapID.readTapStreamDescription()
-        guard let format = AVAudioFormat(streamDescription: &streamDescription),
-              let output = AVAudioFormat(
-                  commonFormat: .pcmFormatFloat32, sampleRate: 16_000, channels: 1, interleaved: false
-              ),
-              let converter = AVAudioConverter(from: format, to: output)
-        else {
-            stopOnQueue()
-            throw SystemAudioTapError.formatUnavailable
-        }
-        tapFormat = format
-        outputFormat = output
-        self.converter = converter
-
+        // 2+3. Converter for the tap's native format, then the aggregate that
+        //      hosts the tap. Any failure here has to tear the tap down again.
         do {
+            try makeConverter()
             try buildAggregateAndStart()
         } catch {
             stopOnQueue()
@@ -92,6 +84,54 @@ nonisolated final class SystemAudioTap: @unchecked Sendable {
 
         installDeviceChangeListener()
         running = true
+    }
+
+    /// The tap's native format and the 16 kHz mono converter built from it,
+    /// stored on the object for the IOProc.
+    private func makeConverter() throws {
+        var streamDescription = try tapID.readTapStreamDescription()
+        guard let format = AVAudioFormat(streamDescription: &streamDescription),
+            let output = AVAudioFormat(
+                commonFormat: .pcmFormatFloat32, sampleRate: 16_000, channels: 1, interleaved: false
+            ),
+            let converter = AVAudioConverter(from: format, to: output)
+        else {
+            throw SystemAudioTapError.formatUnavailable
+        }
+        tapFormat = format
+        outputFormat = output
+        self.converter = converter
+    }
+
+    /// One tap description per recording: a device change rebuilds only the
+    /// aggregate that hosts this tap, so the scope survives it by construction.
+    private func makeTapDescription(for scope: MeetingAudioScope) -> CATapDescription {
+        let processes = liveProcesses(of: scope)
+        guard !processes.isEmpty else {
+            logFallbackToGlobal(scope)
+            return CATapDescription(monoGlobalTapButExcludeProcesses: [])
+        }
+        return CATapDescription(monoMixdownOfProcesses: processes)
+    }
+
+    /// Nothing to tap — a family with no live process, or an unreadable process
+    /// list — is the one degradation this path allows: recording the whole Mac
+    /// beats not recording the meeting at all.
+    private func liveProcesses(of scope: MeetingAudioScope) -> [AudioObjectID] {
+        do {
+            return try scope.liveProcessIDs()
+        } catch {
+            logger.error(
+                "process list unreadable for \(String(describing: scope), privacy: .public): \(error.localizedDescription, privacy: .public)"
+            )
+            return []
+        }
+    }
+
+    /// `.all` is the fallback itself, so only a named family is worth a line.
+    private func logFallbackToGlobal(_ scope: MeetingAudioScope) {
+        guard case .family(let family) = scope else { return }
+        logger.notice("no live process in \(family, privacy: .public): recording all system audio")
     }
 
     private func stopOnQueue() {

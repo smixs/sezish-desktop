@@ -8,10 +8,24 @@ import Foundation
 /// Matching is case-insensitive, like `MeetingDetectionPolicy`: helper ids flip
 /// case against their main app.
 public enum CallAppFamily {
-    // RED: surface only, the behaviour lands in the next commit.
-    public static func of(_ bundleID: String) -> String { "" }
+    private static let helperMarker = ".helper"
 
-    public static func belongs(_ bundleID: String, to family: String) -> Bool { false }
+    /// `com.google.Chrome.helper.Renderer` → `com.google.Chrome`; an id with no
+    /// `.helper` segment is its own family (`us.zoom.xos`). Lowercased, since
+    /// that is how families are compared. A marker with nothing in front of it
+    /// would leave nothing to match on, so such an id is kept whole.
+    public static func of(_ bundleID: String) -> String {
+        let id = bundleID.lowercased()
+        guard let marker = id.range(of: helperMarker), marker.lowerBound != id.startIndex else {
+            return id
+        }
+        return String(id[..<marker.lowerBound])
+    }
+
+    /// True when `bundleID` is that app itself or any helper under it.
+    public static func belongs(_ bundleID: String, to family: String) -> Bool {
+        bundleID.lowercased().hasPrefix(family.lowercased())
+    }
 }
 
 /// Who is on the call. Decided once, when a meeting starts: the system stem is
@@ -40,6 +54,11 @@ public enum MeetingAudioScope: Equatable, Sendable {
     case all
     /// Only the live processes of one app family (`CallAppFamily`).
     case family(String)
+
+    /// What the tap records for a start, whatever the resolver came back with.
+    public static func forCallApp(_ callApp: MeetingCallApp?) -> MeetingAudioScope {
+        callApp?.scope ?? .all
+    }
 }
 
 /// What started a meeting recording.
@@ -47,6 +66,11 @@ public enum MeetingStartSource: Equatable, Sendable {
     case manual
     /// The detector saw a call — with the bundle id it could name, if any.
     case auto(bundleID: String?)
+
+    /// Auto-started meetings are the only ones the detector may stop.
+    public var isAuto: Bool {
+        if case .auto = self { true } else { false }
+    }
 }
 
 /// Decides whose audio a meeting records, from inputs only (the caller supplies
@@ -63,8 +87,31 @@ public enum MeetingCallAppResolver {
         }
     }
 
-    // RED: surface only, the behaviour lands in the next commit.
+    /// The detector's answer is authoritative; the pid only names it for the
+    /// user, so a holder that vanished costs the name and not the scope.
     public static func resolve(
         source: MeetingStartSource, holders: [Holder], policy: MeetingDetectionPolicy
-    ) -> MeetingCallApp? { nil }
+    ) -> MeetingCallApp? {
+        switch source {
+        case .auto(let bundleID): return bundleID.map { auto(bundleID: $0, holders: holders) }
+        case .manual: return manual(holders: holders, policy: policy)
+        }
+    }
+
+    /// A helper id is a fine answer here: the tap is scoped to the family, and
+    /// every helper of that app is inside it.
+    private static func auto(bundleID: String, holders: [Holder]) -> MeetingCallApp {
+        let family = CallAppFamily.of(bundleID)
+        let pid = holders.first { CallAppFamily.belongs($0.bundleID, to: family) }?.pid
+        return MeetingCallApp(bundleID: bundleID, pid: pid, family: family)
+    }
+
+    /// No detector answer, so the first mic holder the policy would record is
+    /// the call app — the same judgement the detector itself makes.
+    private static func manual(holders: [Holder], policy: MeetingDetectionPolicy) -> MeetingCallApp? {
+        let chosen = holders.first { policy.classify($0.bundleID) == .record }
+        return chosen.map {
+            MeetingCallApp(bundleID: $0.bundleID, pid: $0.pid, family: CallAppFamily.of($0.bundleID))
+        }
+    }
 }

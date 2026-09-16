@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import SezishAsr
 import SezishCore
@@ -5,18 +6,10 @@ import SezishCore
 /// Meeting recording lifecycle for `AppState`. Split out like AppState+Model to
 /// keep the state file on UI/hotkey wiring.
 extension AppState {
-    enum MeetingStartSource {
-        case manual
-        case auto(bundleID: String?)
-    }
-
     /// The detector polls only while the toggle is on; its callbacks re-check the
     /// gate anyway, so a stale tick can never start a recording.
     func installMeetingDetector() {
-        let detector = MeetingDetector(policy: MeetingDetectionPolicy(
-            ownBundleID: Bundle.main.bundleIdentifier ?? "com.smixs.sezish",
-            extraDenyPrefixes: settings.extraDenyApps
-        ))
+        let detector = MeetingDetector(policy: meetingPolicy)
         detector.onMeetingStart = { [weak self] bundleID in
             guard let self, self.autoRecordMeetings, self.status == .idle else { return }
             self.startMeetingRecording(source: .auto(bundleID: bundleID))
@@ -41,34 +34,50 @@ extension AppState {
 
     func startMeetingRecording(source: MeetingStartSource) {
         guard status == .idle else { return }
+        // Once, before a single sample is recorded: from here on the system stem
+        // holds the call app's audio and not whatever else is playing. The mic
+        // device (A4) and the file name (A7) read the same field later.
+        let callApp = resolveMeetingCallApp(source: source)
+        meetingCallApp = callApp
         let pipeline = makeMeetingTranscriptionPipeline()
         do {
-            let outcome = try meetingRecorder.start(pipeline: pipeline)
-            meetingTranscription = pipeline
-            if case .auto = source {
-                meetingWasAutoStarted = true
-            } else {
-                meetingWasAutoStarted = false
-            }
-            if case .micOnly = outcome {
-                notifier.notify(title: "sezish", body: strings.notifSystemAudioDenied)
-            }
-            status = .recordingMeeting
-            meetingStartDate = meetingRecorder.startDate
-            if soundsEnabled { sounds.play(.meeting) }
-
-            let auto: Bool = if case .auto = source { true } else { false }
-            recordingPanel.show(
-                startDate: meetingRecorder.startDate ?? Date(),
-                auto: auto,
-                strings: strings,
-                onStop: { [weak self] in self?.stopMeetingRecording() },
-                onHide: { [weak self] in self?.recordingPanel.hide() }
+            let outcome = try meetingRecorder.start(
+                scope: .forCallApp(callApp), pipeline: pipeline
             )
+            meetingTranscription = pipeline
+            meetingWasAutoStarted = source.isAuto
+            presentMeetingStart(outcome: outcome, auto: source.isAuto)
         } catch {
-            pipeline?.cancel()
-            notifier.notify(title: "sezish", body: strings.notifRecordFailed)
+            meetingStartFailed(pipeline)
         }
+    }
+
+    /// A meeting that never started leaves no trace: no call app, no pipeline and
+    /// no recording — and the user is told why.
+    private func meetingStartFailed(_ pipeline: MeetingTranscriptionPipeline?) {
+        meetingCallApp = nil
+        pipeline?.cancel()
+        notifier.notify(title: "sezish", body: strings.notifRecordFailed)
+    }
+
+    /// Everything the user sees when a meeting starts: the warning when only the
+    /// mic could be recorded, the state the menu draws, the chime, and the panel
+    /// with its stop/hide hooks.
+    private func presentMeetingStart(outcome: MeetingRecorder.StartOutcome, auto: Bool) {
+        if case .micOnly = outcome {
+            notifier.notify(title: "sezish", body: strings.notifSystemAudioDenied)
+        }
+        let startDate = meetingRecorder.startDate
+        status = .recordingMeeting
+        meetingStartDate = startDate
+        if soundsEnabled { sounds.play(.meeting) }
+        recordingPanel.show(
+            startDate: startDate ?? Date(),
+            auto: auto,
+            strings: strings,
+            onStop: { [weak self] in self?.stopMeetingRecording() },
+            onHide: { [weak self] in self?.recordingPanel.hide() }
+        )
     }
 
     /// Meetings transcribe with the LOCAL model, PERIOD — never the cloud:
@@ -268,6 +277,26 @@ extension AppState {
         }
     }
 
+    /// The one policy both the detector and a manual start judge mic holders by.
+    private var meetingPolicy: MeetingDetectionPolicy {
+        MeetingDetectionPolicy(
+            ownBundleID: Bundle.main.bundleIdentifier ?? "com.smixs.sezish",
+            extraDenyPrefixes: settings.extraDenyApps
+        )
+    }
+
+    /// The pure decision lives in `SezishCore`; CoreAudio supplies the mic
+    /// holders and the detector supplies the app it saw.
+    private func resolveMeetingCallApp(source: MeetingStartSource) -> MeetingCallApp? {
+        MeetingCallAppResolver.resolve(
+            source: source,
+            holders: AudioProcessList.activeInputHolders().map {
+                .init(bundleID: $0.bundleID, pid: $0.pid)
+            },
+            policy: meetingPolicy
+        )
+    }
+
     func stopMeetingRecording() {
         guard status == .recordingMeeting else { return }
         recordingPanel.hide()
@@ -280,6 +309,7 @@ extension AppState {
             status = .idle
             meetingStartDate = nil
             meetingWasAutoStarted = false
+            meetingCallApp = nil
             meetingTranscription = nil
         }
         do {
@@ -488,5 +518,14 @@ extension AppState {
         md += transcript ?? "_\(strings.notifMeetingNoTranscript)_"
         md += "\n"
         return md
+    }
+}
+
+extension MeetingCallApp {
+    /// Only AppKit can turn a pid into a name, so the lookup lives here while the
+    /// choice of *whose* pid stays pure (`MeetingCallAppResolver`). A process that
+    /// quit since the meeting started simply has no name.
+    var displayName: String? {
+        pid.flatMap { NSRunningApplication(processIdentifier: $0)?.localizedName }
     }
 }

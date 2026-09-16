@@ -1,5 +1,6 @@
 import AudioToolbox
 import Foundation
+import SezishCore
 
 // Minimal CoreAudio property helpers for the process tap and meeting detector.
 // Adapted from insidegui/AudioCap (https://github.com/insidegui/AudioCap,
@@ -94,5 +95,19 @@ extension AudioObjectID {
 
     nonisolated func readString(_ selector: AudioObjectPropertySelector) throws -> String {
         try read(selector, defaultValue: "" as CFString) as String
+    }
+}
+
+/// Which of the live processes a family scope covers. An empty list is a real
+/// answer — nothing of that family is running — and what an empty list means for
+/// the recording is the tap's call, not this helper's. Throws only when the
+/// system-wide process list cannot be read at all.
+extension MeetingAudioScope {
+    nonisolated func liveProcessIDs() throws -> [AudioObjectID] {
+        guard case .family(let family) = self else { return [] }
+        return try AudioObjectID.readProcessList().filter { object in
+            guard let bundleID = object.readProcessBundleID() else { return false }
+            return CallAppFamily.belongs(bundleID, to: family)
+        }
     }
 }

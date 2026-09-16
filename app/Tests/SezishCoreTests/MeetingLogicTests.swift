@@ -306,6 +306,7 @@ struct CallAppFamilyTests {
             "us.zoom.xos",
             "ru.keepcoder.Telegram",
             "org.telegram.desktop",
+            "com.tdesktop.Telegram",
             "com.apple.WebKit.GPU",
             "",
         ]
@@ -367,10 +368,22 @@ struct MeetingCallAppResolverTests {
         #expect(app == MeetingCallApp(bundleID: "us.zoom.xos", pid: 8, family: "us.zoom.xos"))
     }
 
+    @Test func onlyAutoStartsAreAuto() {
+        #expect(MeetingStartSource.auto(bundleID: "us.zoom.xos").isAuto)
+        #expect(MeetingStartSource.auto(bundleID: nil).isAuto)
+        #expect(!MeetingStartSource.manual.isAuto)
+    }
+
+    @Test func theScopeFollowsTheCallApp() {
+        let app = MeetingCallApp(bundleID: "us.zoom.xos", pid: 8, family: "us.zoom.xos")
+        #expect(MeetingAudioScope.forCallApp(app) == .family("us.zoom.xos"))
+        #expect(MeetingAudioScope.forCallApp(nil) == .all)
+    }
+
     @Test func noCallAppToNameMeansTheWholeSystem() {
         let noHolders = MeetingCallAppResolver.resolve(source: .manual, holders: [], policy: policy)
         #expect(noHolders == nil)
-        #expect(noHolders?.scope ?? .all == .all)
+        #expect(MeetingAudioScope.forCallApp(noHolders) == .all)
 
         let deniedOnly = MeetingCallAppResolver.resolve(
             source: .manual,
