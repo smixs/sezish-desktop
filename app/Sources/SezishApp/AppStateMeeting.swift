@@ -25,6 +25,9 @@ extension AppState {
             guard let self, self.meetingWasAutoStarted else { return }
             self.stopMeetingRecording()
         }
+        detector.onStatus = { [weak self] status in
+            self?.meetingDetectorStatus = status
+        }
         meetingDetector = detector
         if autoRecordMeetings { detector.start() }
     }
@@ -32,6 +35,7 @@ extension AppState {
     func setAutoRecordMeetings(_ enabled: Bool) {
         autoRecordMeetings = enabled
         settings.autoRecordMeetings = enabled
+        meetingDetectorStatus = .disabled
         if enabled {
             meetingDetector?.start()
         } else {

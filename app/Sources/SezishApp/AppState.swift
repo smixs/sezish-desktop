@@ -63,6 +63,18 @@ final class AppState {
     /// Mirror of `settings.autoRecordMeetings` (same observability reason).
     var autoRecordMeetings = false
 
+    /// What the detector thinks right now; drives the one-line "why not recording"
+    /// hint in the menu. Mirrored from `MeetingDetector.onStatus`.
+    var meetingDetectorStatus: MeetingDetectorStatus = .disabled
+
+    /// One-line hint under the meeting button, or nil when there is nothing to say:
+    /// auto-record off, or the detector silent. A live recording always reads as one.
+    var detectorStatusLine: String? {
+        guard autoRecordMeetings else { return nil }
+        let status: MeetingDetectorStatus = isRecordingMeeting ? .recording : meetingDetectorStatus
+        return meetingStatusLine(status, text: strings.meetingStatusText)
+    }
+
     /// Mirror of `settings.playSounds` (same observability reason).
     var soundsEnabled = true
 

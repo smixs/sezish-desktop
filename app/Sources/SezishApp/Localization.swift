@@ -150,6 +150,15 @@ struct Strings {
     let meetingSpeakerMe: String
     /// Same, for the system-audio track — everyone else on the call.
     let meetingSpeakerThem: String
+    // One-line "why not recording" hint under the meeting button.
+    let meetingStatusReady: String
+    /// `%@` is the ", "-joined holder names.
+    let meetingStatusDenied: String
+    /// `%@` is the holder name, `%d` the seconds it holds the mic.
+    let meetingStatusCandidate: String
+    let meetingStatusRecording: String
+    /// `%d` is the seconds of silence.
+    let meetingStatusFading: String
 
     // Notifications
     let notifModelMissing: String
@@ -203,6 +212,17 @@ extension Strings {
         // system before those cases existed.
         case .kk, .ky, .en: .ru
         }
+    }
+
+    /// The detector status slots for `meetingStatusLine` (SezishCore).
+    var meetingStatusText: MeetingStatusText {
+        MeetingStatusText(
+            ready: meetingStatusReady,
+            denied: meetingStatusDenied,
+            candidate: meetingStatusCandidate,
+            recording: meetingStatusRecording,
+            fading: meetingStatusFading
+        )
     }
 
 
@@ -314,6 +334,11 @@ extension Strings {
         meetingDocEngine: "Распознано локально на устройстве",
         meetingSpeakerMe: "Я",
         meetingSpeakerThem: "Они",
+        meetingStatusReady: "Готов, жду звонок",
+        meetingStatusDenied: "Микрофон занят: %@ — это не звонок",
+        meetingStatusCandidate: "%@ держит микрофон %d с",
+        meetingStatusRecording: "Идёт встреча",
+        meetingStatusFading: "Тихо уже %d с",
         notifModelMissing: "Модель ещё не скачана. Откройте меню sezish и нажмите «Скачать модель».",
         notifRecordFailed: "Не удалось начать запись. Проверьте доступ к микрофону.",
         notifNoText: "Текст не распознался. Аудио сохранено, распознать заново можно из меню sezish.",
@@ -453,6 +478,11 @@ extension Strings {
         meetingDocEngine: "Matn qurilmaning oʼzida aniqlangan",
         meetingSpeakerMe: "Men",
         meetingSpeakerThem: "Ular",
+        meetingStatusReady: "Tayyor, qoʼngʼiroqni kutyapman",
+        meetingStatusDenied: "Mikrofon band: %@ — bu qoʼngʼiroq emas",
+        meetingStatusCandidate: "%@ mikrofonni %d s ushlab turibdi",
+        meetingStatusRecording: "Uchrashuv yozilmoqda",
+        meetingStatusFading: "Tinchlik %d s davom etyapti",
         notifModelMissing: "Model hali yuklab olinmagan. sezish menyusida «Modelni yuklab olish»ni bosing.",
         notifRecordFailed: "Yozishni boshlab boʼlmadi. Mikrofon ruxsatini tekshiring.",
         notifNoText: "Matn aniqlanmadi. Audio saqlandi, sezish menyusidan qayta aniqlash mumkin.",

@@ -86,6 +86,15 @@ private struct MenuContent: View {
             .buttonStyle(BrandRowButtonStyle())
             .disabled(appState.status == .processingMeeting)
 
+            // Why no recording runs while auto-record is on; nothing when it is off.
+            if appState.autoRecordMeetings, let hint = appState.detectorStatusLine {
+                Text(hint)
+                    .font(.system(size: 11))
+                    .foregroundStyle(Brand.muted)
+                    .lineLimit(2)
+                    .padding(.horizontal, 8)
+            }
+
             // Meetings whose stems are still parked: the only place the user is
             // told a take is waiting for a second attempt.
             if !appState.pendingMeetings.isEmpty {
