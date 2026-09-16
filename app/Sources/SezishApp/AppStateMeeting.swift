@@ -491,9 +491,8 @@ extension AppState {
         let startedAt = meetingStartDate ?? Date().addingTimeInterval(-capture.duration)
         // The file name reads where the call was: the same call app the system
         // stem was scoped to at the start (A1), slugged by the namer.
-        let base = MeetingFileNamer.uniqueBaseName(
-            for: startedAt, app: meetingCallApp?.displayName
-        ) {
+        let callAppName = meetingCallApp?.displayName
+        let base = MeetingFileNamer.uniqueBaseName(for: startedAt, app: callAppName) {
             MeetingSalvage.nameIsTaken($0, in: dir)
         }
         let audioName = await writeMeetingAudio(capture, to: dir, base: base)
@@ -520,7 +519,7 @@ extension AppState {
             duration: capture.duration,
             audioFile: audioName,
             transcript: transcript.text,
-            callApp: meetingCallApp?.displayName,
+            callApp: callAppName,
             recovered: false
         )
         let mdURL = dir.appendingPathComponent(base + ".md")
