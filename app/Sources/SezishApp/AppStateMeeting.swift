@@ -291,7 +291,7 @@ extension AppState {
         MeetingCallAppResolver.resolve(
             source: source,
             holders: AudioProcessList.activeInputHolders().map {
-                .init(bundleID: $0.bundleID, pid: $0.pid)
+                .init(bundleID: $0.bundleID, pid: $0.pid, isRunningOutput: $0.isRunningOutput)
             },
             policy: meetingPolicy
         )

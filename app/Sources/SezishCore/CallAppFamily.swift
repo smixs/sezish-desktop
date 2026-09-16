@@ -59,6 +59,17 @@ public enum MeetingAudioScope: Equatable, Sendable {
     public static func forCallApp(_ callApp: MeetingCallApp?) -> MeetingAudioScope {
         callApp?.scope ?? .all
     }
+
+    /// What a process tap has to cover to hold exactly this scope.
+    public enum TapCoverage: Equatable, Sendable {
+        /// Everything that plays on the Mac.
+        case global
+        /// Only these CoreAudio process objects.
+        case processes([UInt32])
+    }
+
+    // RED: surface only, the decision lands in the next commit.
+    public func coverage(live: [(id: UInt32, bundleID: String?)]) -> TapCoverage { .global }
 }
 
 /// What started a meeting recording.
@@ -80,10 +91,14 @@ public enum MeetingCallAppResolver {
     public struct Holder: Equatable, Sendable {
         public let bundleID: String
         public let pid: pid_t
+        /// True when the process is playing audio as well — the remote side of a
+        /// call, which is what the detector judges a call by.
+        public let isRunningOutput: Bool
 
-        public init(bundleID: String, pid: pid_t) {
+        public init(bundleID: String, pid: pid_t, isRunningOutput: Bool) {
             self.bundleID = bundleID
             self.pid = pid
+            self.isRunningOutput = isRunningOutput
         }
     }
 
