@@ -12,6 +12,10 @@ private let systemTapLog = Logger(subsystem: "com.smixs.sezish", category: "syst
 /// Meeting recording lifecycle for `AppState`. Split out like AppState+Model to
 /// keep the state file on UI/hotkey wiring.
 extension AppState {
+    /// The detector's starts are the only ones the silence net applies to, and
+    /// the only ones the detector may stop. `MeetingStartSource` itself lives in
+    /// `SezishCore` now, together with the call app the tap is scoped to.
+
     /// The detector polls only while the toggle is on; its callbacks re-check the
     /// gate anyway, so a stale tick can never start a recording.
     func installMeetingDetector() {
@@ -22,6 +26,9 @@ extension AppState {
         }
         detector.onMeetingEnd = { [weak self] in
             guard let self, self.meetingWasAutoStarted else { return }
+            // The detector waited out the debounce's stop window before calling
+            // this: that silence is not meeting time either.
+            self.meetingStopReason = .callEnded(MeetingDebounce.defaultStopAfter)
             self.stopMeetingRecording()
         }
         detector.onStatus = { [weak self] facts in
@@ -59,6 +66,9 @@ extension AppState {
             )
             meetingTranscription = pipeline
             meetingWasAutoStarted = source.isAuto
+            // First sample to last: the two safety nets live from here and can end
+            // the recording on their own if the call goes quiet or runs five hours.
+            startMeetingAutoStop(auto: source.isAuto)
             presentMeetingStart(outcome: outcome, auto: source.isAuto)
         } catch {
             // The one place a failed start is not swallowed: the cause (an OSStatus from
@@ -79,10 +89,11 @@ extension AppState {
         notifier.notify(title: "sezish", body: strings.notifRecordFailed)
     }
 
-    /// Everything the user sees when a meeting starts: the warning when only the
-    /// mic could be recorded, the state the menu draws, the chime, and the panel
-    /// with its stop/hide hooks.
+    /// Everything that happens once the recorder is running: the state the detector
+    /// and the menu read, the warning when only the mic could be recorded, the chime,
+    /// and the panel with its stop/hide hooks.
     private func presentMeetingStart(outcome: MeetingRecorder.StartOutcome, auto: Bool) {
+        meetingWasAutoStarted = auto
         if case .micOnly = outcome {
             notifier.notify(title: "sezish", body: strings.notifSystemAudioDenied)
         }
@@ -97,6 +108,57 @@ extension AppState {
             onStop: { [weak self] in self?.stopMeetingRecording() },
             onHide: { [weak self] in self?.recordingPanel.hide() }
         )
+    }
+
+    /// Arms the nets for this recording and starts the 1 Hz poll that feeds them.
+    /// The thresholds are hidden settings (`meetingSilenceStopMinutes`,
+    /// `meetingMaxDurationMinutes`); the poll dies with the recording.
+    private func startMeetingAutoStop(auto: Bool) {
+        meetingAutoStop = MeetingAutoStop(
+            startedAt: meetingRecorder.startDate ?? Date(),
+            isAuto: auto,
+            silenceAfter: settings.meetingSilenceStopAfter,
+            maxDuration: settings.meetingMaxDurationAfter
+        )
+        meetingStopPoll?.invalidate()
+        meetingStopPoll = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.pollMeetingAutoStop() }
+        }
+    }
+
+    /// One tick of the nets: the tracks' loudness in, a stop reason out.
+    private func pollMeetingAutoStop() {
+        let now = Date()
+        let loudness = meetingRecorder.loudness(at: now)
+        guard
+            let reason = meetingAutoStop?.tick(
+                micLoud: loudness.mic, systemLoud: loudness.system, at: now
+            )
+        else { return }
+        meetingStopReason = reason
+        notifyMeetingStopped(reason)
+        stopMeetingRecording()
+    }
+
+    /// The app ended this recording on its own, so it owes the user a reason. A
+    /// manual stop and the detector's stop are silent: nobody is surprised.
+    private func notifyMeetingStopped(_ reason: MeetingStopReason) {
+        switch reason {
+        case .silence(let seconds):
+            notifier.notify(
+                title: "sezish",
+                body: String(format: strings.notifStoppedBySilence, Int(seconds) / 60)
+            )
+        case .ceiling(let seconds):
+            // A ceiling set below an hour (hidden setting, hand-tuned) still reads
+            // as an hour: "предел 0 ч" would be nonsense.
+            notifier.notify(
+                title: "sezish",
+                body: String(format: strings.notifStoppedByCeiling, max(1, Int(seconds) / 3_600))
+            )
+        case .manual, .callEnded:
+            return
+        }
     }
 
     /// Meetings transcribe with the LOCAL model, PERIOD — never the cloud:
@@ -374,6 +436,11 @@ extension AppState {
 
     func stopMeetingRecording() {
         guard status == .recordingMeeting else { return }
+        // The nets die with the recording — a stop is a stop, whoever asked for it,
+        // and the poll must not fire again while the take is being mixed down.
+        meetingAutoStop = nil
+        meetingStopPoll?.invalidate()
+        meetingStopPoll = nil
         recordingPanel.hide()
         status = .processingMeeting
         Task { await self.finishMeeting() }
@@ -386,6 +453,7 @@ extension AppState {
             meetingWasAutoStarted = false
             meetingCallApp = nil
             meetingTranscription = nil
+            meetingStopReason = .manual
         }
         do {
             let capture = try await meetingRecorder.stop()
@@ -408,167 +476,105 @@ extension AppState {
         ) {
             MeetingSalvage.nameIsTaken($0, in: dir)
         }
-        let audioName = await writeMeetingAudio(capture: capture, dir: dir, base: base)
+    /// Audio lands on disk FIRST (the take must survive any transcription
+    /// failure), then the transcript .md joins it.
+    private func runMeetingPipeline(_ capture: MeetingRecorder.Capture) async {
+        let dir = MeetingRecorder.meetingsDirectory
+        let fm = FileManager.default
+        let startedAt = meetingStartDate ?? Date().addingTimeInterval(-capture.duration)
+        // The file name reads where the call was: the same call app the system
+        // stem was scoped to at the start (A1), slugged by the namer.
+        let base = MeetingFileNamer.uniqueBaseName(
+            for: startedAt, app: meetingCallApp?.displayName
+        ) {
+            MeetingSalvage.nameIsTaken($0, in: dir)
+        }
+        let audioName = await writeMeetingAudio(capture, to: dir, base: base)
 
         // Too short to be a meeting (voice search, a voice message): the audio
         // stays, everything downstream — transcript, .md, hook, summary,
-        // notification — is skipped, silently.
-        guard MeetingTranscriptionRule.shouldTranscribe(
-            duration: capture.duration, stopReason: .manual
-        ) else {
-            abandonShortTake(tempDir: capture.tempDir)
+        // notification — is skipped, silently. The window an automatic stop waited
+        // out is not meeting time, so it comes off the duration first.
+        guard
+            MeetingTranscriptionRule.shouldTranscribe(
+                duration: capture.duration, stopReason: meetingStopReason
+            )
+        else {
+            meetingTranscription?.cancel()
+            try? fm.removeItem(at: capture.tempDir)
             return
         }
 
-        let result = await drainMeetingTranscript()
-        writeMeetingFiles(
-            dir: dir, base: base, startedAt: startedAt, duration: capture.duration,
-            audioName: audioName, result: result, tempDir: capture.tempDir
-        )
-    }
-
-    /// What the transcript drain came back with: text, why not, and whether the
-    /// stems stay parked for a retry.
-    private struct MeetingTranscriptResult: Sendable {
-        let transcript: String?
-        let failureDetail: String?
-        let needsRetry: Bool
-    }
-
-    private func writeMeetingAudio(
-        capture: MeetingRecorder.Capture, dir: URL, base: String
-    ) async -> String {
-        do {
-            try await M4AWriter.write(
-                samples16k: capture.mixed16k,
-                to: dir.appendingPathComponent(base + ".m4a")
-            )
-            return base + ".m4a"
-        } catch {
-            // Fallback: raw WAV — bigger, but the take is never lost.
-            return await writeMeetingWavFallback(capture: capture, dir: dir, base: base)
-        }
-    }
-
-    private func writeMeetingWavFallback(
-        capture: MeetingRecorder.Capture, dir: URL, base: String
-    ) async -> String {
-        let audioName = base + ".wav"
-        let wavURL = dir.appendingPathComponent(audioName)
-        let samples = capture.mixed16k
-        try? await Task.detached(priority: .userInitiated) {
-            let spool = try PCMSpoolFile(url: wavURL)
-            try spool.append(samples)
-            try spool.finalize()
-        }.value
-        return audioName
-    }
-
-    private func abandonShortTake(tempDir: URL) {
-        meetingTranscription?.cancel()
-        try? FileManager.default.removeItem(at: tempDir)
-    }
-
-    private func drainMeetingTranscript() async -> MeetingTranscriptResult {
-        // No model on disk, or holes where chunks failed: this take still has
-        // unrecognised text in it, so it is kept for a retry. Not `transcript ==
-        // nil` — a silent meeting will never produce words and would then offer
-        // itself for a retry forever.
-        if let pipeline = meetingTranscription {
-            // Chunks were transcribed live during the recording; this only
-            // drains the tail, so it returns within seconds even for long calls.
-            // One paragraph per ~30 s chunk, prefixed with its recording-relative
-            // timestamp and — when both tracks were recorded — with who spoke;
-            // a jump in timestamps means a silent stretch.
-            let segments = await pipeline.finish()
-            let transcript = TranscriptSegment.render(
-                segments,
-                meLabel: strings.meetingSpeakerMe,
-                themLabel: strings.meetingSpeakerThem
-            )
-            return MeetingTranscriptResult(
-                transcript: transcript,
-                failureDetail: nil,
-                needsRetry: pipeline.failedChunkCount > 0
-            )
-        }
-        // No local model on disk. Meetings NEVER go to the cloud (see
-        // makeMeetingTranscriptionPipeline) — keep the audio, say why.
-        return MeetingTranscriptResult(
-            transcript: nil,
-            failureDetail: strings.notifModelMissing,
-            needsRetry: true
-        )
-    }
-
-    private func writeMeetingFiles(
-        dir: URL,
-        base: String,
-        startedAt: Date,
-        duration: TimeInterval,
-        audioName: String,
-        result: MeetingTranscriptResult,
-        tempDir: URL
-    ) {
+        let transcript = await meetingTranscript()
         let markdown = Self.meetingMarkdown(
             strings: strings,
             language: language,
             date: startedAt,
-            duration: duration,
+            duration: capture.duration,
             audioFile: audioName,
-            transcript: result.transcript,
+            transcript: transcript.text,
             callApp: meetingCallApp?.displayName,
             recovered: false
         )
         let mdURL = dir.appendingPathComponent(base + ".md")
         try? markdown.write(to: mdURL, atomically: true, encoding: .utf8)
 
-        if result.needsRetry {
-            parkMeetingStems(tempDir: tempDir, base: base, dir: dir)
+        if transcript.needsRetry {
+            // The retry reads the stems, so they move next to the meeting instead
+            // of being deleted. A move that fails must still clear the spool dir:
+            // audio and .md are already on disk, and a stray `.rec-` dir would
+            // come back as a second meeting on the next launch.
+            if (try? MeetingSalvage.stash(stems: capture.tempDir, base: base, in: dir)) == nil {
+                try? fm.removeItem(at: capture.tempDir)
+            }
         } else {
             // Audio and transcript are both on disk now, so whatever the user chains
             // after a meeting always opens a finished one. A meeting waiting for a
             // retry fires neither hook nor summary — both run once, after the retry.
             MeetingHook.fire(command: settings.meetingHook, mdURL: mdURL)
-            startSummary(meetingMd: mdURL, hasTranscript: result.transcript != nil)
-            try? FileManager.default.removeItem(at: tempDir)
+            startSummary(meetingMd: mdURL, hasTranscript: transcript.text != nil)
+            try? fm.removeItem(at: capture.tempDir)
         }
 
-        notifier.notify(title: "sezish", body: meetingResultBody(result: result))
-
+        notifier.notify(title: "sezish", body: meetingNotificationBody(transcript))
         pendingMeetings = MeetingSalvage.discoverStems(in: dir)
         refreshMeetings()
     }
 
-    private func parkMeetingStems(tempDir: URL, base: String, dir: URL) {
-        // The retry reads the stems, so they move next to the meeting instead
-        // of being deleted. A move that fails must still clear the spool dir:
-        // audio and .md are already on disk, and a stray `.rec-` dir would
-        // come back as a second meeting on the next launch.
-        if (try? MeetingSalvage.stash(stems: tempDir, base: base, in: dir)) == nil {
-            try? FileManager.default.removeItem(at: tempDir)
+    /// A take that still has unrecognised text in it: the failure detail when there
+    /// is one (the "download the model" line already points at the menu, so a second
+    /// hint would only repeat it), otherwise the retry hint.
+    private func retryNotification(hasText: Bool, failureDetail: String?) -> String {
+        if hasText { return strings.notifMeetingPartial }
+        guard let failureDetail else {
+            return strings.notifMeetingNoTranscript + " " + strings.notifMeetingRetryHint
         }
+        return strings.notifMeetingNoTranscript + " " + failureDetail
     }
 
-    private func meetingResultBody(result: MeetingTranscriptResult) -> String {
-        guard result.needsRetry else {
-            return result.transcript != nil
-                ? strings.notifTranscriptReady
-                : strings.notifMeetingNoTranscript
+    /// Audio first, always: a take that is on disk survives any transcription
+    /// failure. The M4A is the normal path; a write that fails falls back to a raw
+    /// WAV — bigger, but the take is never lost. Returns the file name used.
+    private func writeMeetingAudio(
+        _ capture: MeetingRecorder.Capture, to dir: URL, base: String
+    ) async -> String {
+        let audioName = base + ".m4a"
+        do {
+            try await M4AWriter.write(
+                samples16k: capture.mixed16k, to: dir.appendingPathComponent(audioName)
+            )
+            return audioName
+        } catch {
+            let wavName = base + ".wav"
+            let wavURL = dir.appendingPathComponent(wavName)
+            let samples = capture.mixed16k
+            try? await Task.detached(priority: .userInitiated) {
+                let spool = try PCMSpoolFile(url: wavURL)
+                try spool.append(samples)
+                try spool.finalize()
+            }.value
+            return wavName
         }
-        return retryMeetingBody(result: result)
-    }
-
-    private func retryMeetingBody(result: MeetingTranscriptResult) -> String {
-        if result.transcript != nil {
-            return strings.notifMeetingPartial
-        }
-        if let failureDetail = result.failureDetail {
-            // The detail is the "download the model" line, which already points
-            // at the menu; a second hint about the menu would only repeat it.
-            return strings.notifMeetingNoTranscript + " " + failureDetail
-        }
-        return strings.notifMeetingNoTranscript + " " + strings.notifMeetingRetryHint
     }
 
     /// Hands a finished meeting to the summary engine and forgets about it.

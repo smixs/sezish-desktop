@@ -93,7 +93,6 @@ public enum MeetingTranscriptionRule {
     public static func shouldTranscribe(
         duration: TimeInterval, stopReason: MeetingStopReason
     ) -> Bool {
-        // RED: the discount lands with `trailingSilence` in the next commit.
-        duration >= minimumSeconds
+        duration - stopReason.trailingSilence >= minimumSeconds
     }
 }

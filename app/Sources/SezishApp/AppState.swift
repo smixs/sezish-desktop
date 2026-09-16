@@ -148,6 +148,14 @@ final class AppState {
     /// nil means no call app was identifiable and the tap recorded everything.
     /// Read by the mic device (A4) and the file name (A7); cleared in `finishMeeting`.
     @ObservationIgnored var meetingCallApp: MeetingCallApp?
+    /// The silence and ceiling nets for the recording in flight; armed with the
+    /// recording and dropped with it.
+    @ObservationIgnored var meetingAutoStop: MeetingAutoStop?
+    /// The 1 Hz poll that feeds them — alive only while a meeting is recorded.
+    @ObservationIgnored var meetingStopPoll: Timer?
+    /// What ended the last recording: the short-recording rule discounts the
+    /// trailing silence an automatic stop implies.
+    @ObservationIgnored var meetingStopReason: MeetingStopReason = .manual
     /// Fed by the mic tap during dictation; drives the overlay's wave.
     @ObservationIgnored let levelMeter = AudioLevelMeter()
     @ObservationIgnored private var shortcutMonitor: ShortcutMonitor?

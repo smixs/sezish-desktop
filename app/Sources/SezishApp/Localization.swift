@@ -181,6 +181,11 @@ struct Strings {
     let meetingsPending: String
     let notifMeetingRetryHint: String
     let notifMeetingPartial: String
+    /// Carries a `%d`: minutes of both-track silence that ended the recording by
+    /// itself, so the user learns why the take stopped without them.
+    let notifStoppedBySilence: String
+    /// Carries a `%d`: hours before the ceiling ended the recording.
+    let notifStoppedByCeiling: String
 
     // Settings: history
     /// Pane title in the settings sidebar.
@@ -359,6 +364,8 @@ extension Strings {
         meetingsPending: "Встречи без текста: %d",
         notifMeetingRetryHint: "Распознать заново: меню sezish.",
         notifMeetingPartial: "Распознано частично. Аудио сохранено, можно распознать заново.",
+        notifStoppedBySilence: "Запись остановлена: %d мин тишины.",
+        notifStoppedByCeiling: "Запись остановлена: достигнут предел %d ч.",
         paneHistory: "История",
         historyMeetings: "Встречи",
         revealFile: "Показать",
@@ -505,6 +512,8 @@ extension Strings {
         meetingsPending: "Matnsiz uchrashuvlar: %d",
         notifMeetingRetryHint: "Qayta aniqlash: sezish menyusi.",
         notifMeetingPartial: "Qisman aniqlandi. Audio saqlandi, qayta aniqlash mumkin.",
+        notifStoppedBySilence: "Yozuv toʼxtatildi: %d daqiqa sukunat.",
+        notifStoppedByCeiling: "Yozuv toʼxtatildi: %d soatlik chegaraga yetdi.",
         paneHistory: "Tarix",
         historyMeetings: "Uchrashuvlar",
         revealFile: "Koʼrsatish",
