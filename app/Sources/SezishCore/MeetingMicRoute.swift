@@ -14,10 +14,14 @@ public struct MicDevice: Equatable, Sendable {
 
 /// Which input the mic track records from.
 public enum MeetingMicRoute {
-    // RED: surface only, the behaviour lands in the next commit.
+    /// The call app's own input wins: if Zoom listens to the headset while the
+    /// system sits on the built-in mic, recording the system default would capture
+    /// the room around the call. With nothing from the call app the system default
+    /// is the honest answer, and with neither the engine picks its own — exactly
+    /// what dictation has always done.
     public static func device(
         callAppInputs: [MicDevice], default defaultDevice: MicDevice?
     ) -> MicDevice? {
-        nil
+        callAppInputs.first ?? defaultDevice
     }
 }

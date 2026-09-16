@@ -1,4 +1,6 @@
 @preconcurrency import AVFoundation
+import AudioToolbox
+@preconcurrency import AVFoundation
 import Foundation
 import SezishCore
 
@@ -6,6 +8,7 @@ enum MicError: LocalizedError {
     case permissionDenied
     case permissionPending
     case formatUnavailable
+    case deviceUnavailable(any Error)
 
     var errorDescription: String? {
         switch self {
@@ -15,6 +18,8 @@ enum MicError: LocalizedError {
             "Grant Microphone access when prompted, then hold the key again."
         case .formatUnavailable:
             "No usable microphone input format is available."
+        case .deviceUnavailable(let cause):
+            "The selected input device could not be opened: \(cause.localizedDescription)"
         }
     }
 }
@@ -49,23 +54,23 @@ nonisolated final class MicRecorder: MicCapture, @unchecked Sendable {
         self.keepsBuffer = keepsBuffer ?? (onSamples16k == nil)
     }
 
+    /// The dictation path, and the `MicCapture` seam: the engine's own default.
     func start() throws {
+        try start(deviceID: nil)
+    }
+
+    /// `deviceID` pins the engine to one input device — the meeting path, where the
+    /// mic has to be the device the call app listens to. nil keeps whatever the
+    /// system default is, which is all dictation ever wants. A device that cannot
+    /// be opened fails the start with its cause: falling back to the default would
+    /// silently record the room instead of the call.
+    func start(deviceID: AudioDeviceID?) throws {
         try ensurePermission()
 
         let engine = AVAudioEngine()
         let input = engine.inputNode
-        let inputFormat = input.inputFormat(forBus: 0)
-        guard inputFormat.sampleRate > 0,
-              let outputFormat = AVAudioFormat(
-                  commonFormat: .pcmFormatFloat32,
-                  sampleRate: 16_000,
-                  channels: 1,
-                  interleaved: false
-              ),
-              let converter = AVAudioConverter(from: inputFormat, to: outputFormat)
-        else {
-            throw MicError.formatUnavailable
-        }
+        try pinInputDevice(deviceID, on: input)
+        let (inputFormat, outputFormat, converter) = try Self.formats(for: input)
 
         lock.withLock {
             samples = []
@@ -103,6 +108,50 @@ nonisolated final class MicRecorder: MicCapture, @unchecked Sendable {
     }
 
     // MARK: - Permission
+
+    /// The device's own input format, followed by the 16 kHz mono converter built
+    /// from it.
+    private static func formats(
+        for input: AVAudioInputNode
+    ) throws -> (AVAudioFormat, AVAudioFormat, AVAudioConverter) {
+        let inputFormat = input.inputFormat(forBus: 0)
+        guard inputFormat.sampleRate > 0,
+              let outputFormat = AVAudioFormat(
+                  commonFormat: .pcmFormatFloat32,
+                  sampleRate: 16_000,
+                  channels: 1,
+                  interleaved: false
+              ),
+              let converter = AVAudioConverter(from: inputFormat, to: outputFormat)
+        else {
+            throw MicError.formatUnavailable
+        }
+        return (inputFormat, outputFormat, converter)
+    }
+
+    /// Pin the engine's input to `deviceID`; nil leaves the engine on the system
+    /// default, which is what dictation records from. `AUAudioUnit.setDeviceID` is
+    /// the only way to do that on an `AVAudioEngine`, and it has to happen before
+    /// the format is read and the tap installed — the format follows the device.
+    private func pinInputDevice(_ deviceID: AudioDeviceID?, on input: AVAudioInputNode) throws {
+        guard let deviceID else { return }
+        do {
+            try input.auAudioUnit.setDeviceID(deviceID)
+        } catch {
+            throw MicError.deviceUnavailable(error)
+        }
+    }
+
+    /// Pin the engine's input to one device. `AUAudioUnit.setDeviceID` is the only
+    /// way to do that on an `AVAudioEngine`, and it has to happen before the format
+    /// is read and the tap installed — the format follows the device.
+    private func pinInputDevice(_ deviceID: AudioDeviceID, on input: AVAudioInputNode) throws {
+        do {
+            try input.auAudioUnit.setDeviceID(deviceID)
+        } catch {
+            throw MicError.deviceUnavailable(error)
+        }
+    }
 
     private func ensurePermission() throws {
         switch AVCaptureDevice.authorizationStatus(for: .audio) {

@@ -1,3 +1,4 @@
+import AudioToolbox
 import Foundation
 import SezishCore
 
@@ -43,10 +44,13 @@ final class MeetingRecorder {
 
     /// `pipeline` (optional) gets the same sample streams the stems spool, for
     /// incremental transcription while the recording is still running. `coverage`
-    /// decides whose audio the system stem holds: the call app's own processes, or
-    /// everything that plays when no app could be named.
+    /// decides whose audio the system stem holds — the call app's own processes, or
+    /// everything that plays when no app could be named (decided in `SezishCore`).
+    /// `device` pins the microphone to the input the call app listens to; nil leaves
+    /// the engine on the system default, exactly as dictation records.
     func start(
-        coverage: TapCoverage, pipeline: MeetingTranscriptionPipeline? = nil
+        coverage: TapCoverage, device: AudioDeviceID?,
+        pipeline: MeetingTranscriptionPipeline? = nil
     ) throws -> StartOutcome {
         guard !isRecording else { return .full }
 
@@ -67,7 +71,7 @@ final class MeetingRecorder {
             pipeline?.ingestMic($0)
         })
         do {
-            try mic.start()
+            try mic.start(deviceID: device)
         } catch {
             try? FileManager.default.removeItem(at: dir)
             throw error

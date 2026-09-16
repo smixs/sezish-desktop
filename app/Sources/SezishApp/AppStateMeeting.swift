@@ -1,12 +1,17 @@
 import AppKit
+import AudioToolbox
 import Foundation
 import SezishAsr
 import SezishCore
 import os
 
-/// One line per start about the system stem: what it holds, and when the only
-/// thing left to hold is the whole Mac. Same subsystem as every other log.
+/// One line per meeting start about the system stem — what it holds, and when the
+/// only thing left to hold is the whole Mac.
 private let systemTapLog = Logger(subsystem: "com.smixs.sezish", category: "system-tap")
+
+/// One line per meeting start about the mic — which input it follows, and why.
+/// Same subsystem and `log show` predicate as every other log in the app.
+private let meetingMicLog = Logger(subsystem: "com.smixs.sezish", category: "mic-route")
 
 /// Meeting recording lifecycle for `AppState`. Split out like AppState+Model to
 /// keep the state file on UI/hotkey wiring.
@@ -48,10 +53,13 @@ extension AppState {
         let snapshot = readProcessSnapshot()
         let callApp = resolveMeetingCallApp(source: source, snapshot: snapshot)
         meetingCallApp = callApp
+        let mic = resolveMeetingMicDevice(for: callApp, snapshot: snapshot)
         let pipeline = makeMeetingTranscriptionPipeline()
         do {
             let outcome = try meetingRecorder.start(
-                coverage: tapCoverage(for: callApp, snapshot: snapshot), pipeline: pipeline
+                coverage: tapCoverage(for: callApp, snapshot: snapshot),
+                device: mic?.id,
+                pipeline: pipeline
             )
             meetingTranscription = pipeline
             meetingWasAutoStarted = source.isAuto
@@ -335,6 +343,43 @@ extension AppState {
             "no live process in \(callApp.family, privacy: .public): recording all system audio"
         )
         return coverage
+    }
+
+    /// The microphone the meeting records: the one the call app listens to, else
+    /// the system default, else nothing (the engine picks its own). Decided once,
+    /// before the engine opens: an app that moves to another device mid-call is
+    /// deliberately not followed, so one line says what was chosen and why. The
+    /// family's processes come from the same snapshot the tap used.
+    private func resolveMeetingMicDevice(
+        for callApp: MeetingCallApp?, snapshot: AudioProcessSnapshot
+    ) -> MicDevice? {
+        let callAppInputs = callApp?.inputDevices(in: snapshot) ?? []
+        let chosen = MeetingMicRoute.device(
+            callAppInputs: callAppInputs, default: Self.systemMicDevice()
+        )
+        logMeetingMic(chosen, callAppInputs: callAppInputs)
+        return chosen
+    }
+
+    /// The system default input, nil when there is none or it cannot be named. The
+    /// engine opening the default anyway makes that a real answer rather than a
+    /// failure to record.
+    private static func systemMicDevice() -> MicDevice? {
+        guard let device = try? AudioObjectID.readDefaultInputDevice(), device.isValid else {
+            return nil
+        }
+        return try? device.readMicDevice()
+    }
+
+    /// Which device the mic follows and why — the two cases look identical in the
+    /// log whenever the call app happens to sit on the system input.
+    private func logMeetingMic(_ device: MicDevice?, callAppInputs: [MicDevice]) {
+        guard let device else {
+            meetingMicLog.notice("meeting mic: engine default (no call app input, no system default)")
+            return
+        }
+        let source = callAppInputs.contains(device) ? "call app" : "system default"
+        meetingMicLog.notice("meeting mic: \(device.name, privacy: .public) (\(source, privacy: .public))")
     }
 
     func stopMeetingRecording() {
