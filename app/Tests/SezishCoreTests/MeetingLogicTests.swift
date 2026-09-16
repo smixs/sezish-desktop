@@ -296,6 +296,94 @@ struct MeetingFileNamerTests {
     }
 }
 
+struct CallAppFamilyTests {
+    /// The round trip that has to hold for every anchor: an id is always inside
+    /// the family that id resolves to.
+    @Test func anchorsResolveAndStayInsideTheirFamily() {
+        let anchors = [
+            "com.google.Chrome.helper.Renderer",
+            "com.google.Chrome",
+            "us.zoom.xos",
+            "ru.keepcoder.Telegram",
+            "org.telegram.desktop",
+            "com.apple.WebKit.GPU",
+            "",
+        ]
+        for anchor in anchors {
+            #expect(CallAppFamily.belongs(anchor, to: CallAppFamily.of(anchor)))
+        }
+    }
+
+    @Test func helperFoldsIntoItsAppAndAPlainIdStaysWhole() {
+        #expect(CallAppFamily.of("com.google.Chrome.helper.Renderer") == "com.google.chrome")
+        #expect(CallAppFamily.of("us.zoom.xos") == "us.zoom.xos")
+        #expect(CallAppFamily.of("com.apple.WebKit.GPU") == "com.apple.webkit.gpu")
+    }
+
+    @Test func caseIsIgnoredOnBothSides() {
+        #expect(CallAppFamily.of("COM.Google.Chrome.HELPER.Renderer") == "com.google.chrome")
+        #expect(CallAppFamily.belongs("COM.GOOGLE.CHROME.HELPER", to: "com.google.Chrome"))
+    }
+
+    @Test func garbageIsNotACrash() {
+        for junk in ["", ".", "..", ".helper", "..helper..", "🦊.helper.🦊", "helper", "a.helper.b.helper.c"] {
+            #expect(CallAppFamily.belongs(junk, to: CallAppFamily.of(junk)))
+        }
+    }
+
+    @Test func anotherAppDoesNotBelongToTheFamily() {
+        #expect(!CallAppFamily.belongs("com.google.Chrome.helper", to: "com.google.chrome.canary"))
+        #expect(!CallAppFamily.belongs("us.zoom.xos", to: "com.apple.webkit.gpu"))
+    }
+}
+
+struct MeetingCallAppResolverTests {
+    private let policy = MeetingDetectionPolicy(ownBundleID: "com.smixs.sezish")
+
+    /// The detector's id can be a helper: the family is what the tap records.
+    @Test func autoTakesTheDetectorAppAndItsFamily() {
+        let app = MeetingCallAppResolver.resolve(
+            source: .auto(bundleID: "com.google.Chrome.helper.Renderer"),
+            holders: [.init(bundleID: "com.google.Chrome.helper.Renderer", pid: 42)],
+            policy: policy
+        )
+        #expect(app?.bundleID == "com.google.Chrome.helper.Renderer")
+        #expect(app?.pid == 42)
+        #expect(app?.family == "com.google.chrome")
+        #expect(app?.scope == .family("com.google.chrome"))
+    }
+
+    /// A manual start has no detector answer: the first mic holder the policy
+    /// would record is the call app, deny-listed ones skipped.
+    @Test func manualTakesTheFirstMicHolderThatIsNotDenied() {
+        let app = MeetingCallAppResolver.resolve(
+            source: .manual,
+            holders: [
+                .init(bundleID: "com.electron.wispr-flow", pid: 7),
+                .init(bundleID: "us.zoom.xos", pid: 8),
+            ],
+            policy: policy
+        )
+        #expect(app == MeetingCallApp(bundleID: "us.zoom.xos", pid: 8, family: "us.zoom.xos"))
+    }
+
+    @Test func noCallAppToNameMeansTheWholeSystem() {
+        let noHolders = MeetingCallAppResolver.resolve(source: .manual, holders: [], policy: policy)
+        #expect(noHolders == nil)
+        #expect(noHolders?.scope ?? .all == .all)
+
+        let deniedOnly = MeetingCallAppResolver.resolve(
+            source: .manual,
+            holders: [.init(bundleID: "com.smixs.sezish", pid: 1)],
+            policy: policy
+        )
+        #expect(deniedOnly == nil)
+
+        // The detector fires without a name when no holder matched its policy.
+        #expect(MeetingCallAppResolver.resolve(source: .auto(bundleID: nil), holders: [], policy: policy) == nil)
+    }
+}
+
 struct PlaySoundsSettingTests {
     @Test func defaultsToTrueAndRoundTrips() {
         let suite = "PlaySoundsTests-\(UUID().uuidString)"
