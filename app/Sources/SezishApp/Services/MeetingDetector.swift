@@ -17,7 +17,7 @@ final class MeetingDetector {
     var onMeetingEnd: (() -> Void)?
     /// Fires after every tick with what the detector thinks right now; AppState
     /// mirrors it into the one-line "why not recording" menu hint.
-    var onStatus: ((MeetingDetectorStatus) -> Void)?
+    var onStatus: ((MeetingDetectorStatus) -> Void) = { _ in }
 
     private let policy: MeetingDetectionPolicy
     private var debounce = MeetingDebounce()
@@ -46,6 +46,7 @@ final class MeetingDetector {
         poll = nil
         debounce.reset()
         seenOutput.removeAll()
+        onStatus(.disabled)
     }
 
     private func tick() {
@@ -58,9 +59,7 @@ final class MeetingDetector {
     }
 
     private func noteOutput(holders: [AudioProcessList.MicHolder]) {
-        for holder in holders where holder.isRunningOutput {
-            seenOutput.insert(holder.bundleID)
-        }
+        holders.filter(\.isRunningOutput).forEach { seenOutput.insert($0.bundleID) }
     }
 
     private func duplexIDs(holders: [AudioProcessList.MicHolder]) -> [String] {
@@ -72,15 +71,19 @@ final class MeetingDetector {
         candidate: MeetingDetectionPolicy.Candidate?,
         holdersEmpty: Bool
     ) {
-        switch event {
-        case .start:
+        // If-chain, not switch: the arms end in callbacks, and only three
+        // events exist — a future fourth must get its own arm here, not ride
+        // the stop path below.
+        if event == .start {
             onMeetingStart?(candidate?.bundleID)
-        case .stop:
-            seenOutput.removeAll()
-            onMeetingEnd?()
-        case nil:
-            noteSilence(holdersEmpty: holdersEmpty)
+            return
         }
+        if event == nil {
+            noteSilence(holdersEmpty: holdersEmpty)
+            return
+        }
+        seenOutput.removeAll()
+        onMeetingEnd?()
     }
 
     private func noteSilence(holdersEmpty: Bool) {
@@ -92,22 +95,21 @@ final class MeetingDetector {
         holders: [AudioProcessList.MicHolder],
         candidate: MeetingDetectionPolicy.Candidate?
     ) {
-        guard let onStatus else { return }
         onStatus(MeetingDetectorStatus.resolve(
             autoRecord: true,
             debounce: debounce,
             candidateName: candidate.map { name(of: $0.bundleID, in: holders) },
             deniedNames: holders.filter { policy.classify($0.bundleID) == .deny }
-                .map { AudioProcessList.displayName(for: $0) },
+                .map { AudioProcessList.displayName(of: $0) },
             at: Date()
         ))
     }
 
     private func name(of bundleID: String, in holders: [AudioProcessList.MicHolder]) -> String {
-        if let holder = holders.first(where: { $0.bundleID == bundleID }) {
-            return AudioProcessList.displayName(for: holder)
-        }
-        return bundleID.components(separatedBy: ".").last ?? bundleID
+        holders.first(where: { $0.bundleID == bundleID })
+            .map(AudioProcessList.displayName(of:))
+            ?? bundleID.components(separatedBy: ".").last
+            ?? bundleID
     }
 }
 
@@ -123,7 +125,7 @@ enum AudioProcessList {
 
     /// Display name for the menu line: the running app's name when the pid is
     /// known, else the last bundle id segment ("us.zoom.xos" reads as "xos").
-    nonisolated static func displayName(for holder: MicHolder) -> String {
+    nonisolated static func displayName(of holder: MicHolder) -> String {
         if holder.pid > 0,
             let name = NSRunningApplication(processIdentifier: holder.pid)?.localizedName,
             !name.isEmpty {

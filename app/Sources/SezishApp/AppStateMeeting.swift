@@ -35,7 +35,6 @@ extension AppState {
     func setAutoRecordMeetings(_ enabled: Bool) {
         autoRecordMeetings = enabled
         settings.autoRecordMeetings = enabled
-        meetingDetectorStatus = .disabled
         if enabled {
             meetingDetector?.start()
         } else {

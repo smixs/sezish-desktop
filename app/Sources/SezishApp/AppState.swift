@@ -67,10 +67,9 @@ final class AppState {
     /// hint in the menu. Mirrored from `MeetingDetector.onStatus`.
     var meetingDetectorStatus: MeetingDetectorStatus = .disabled
 
-    /// One-line hint under the meeting button, or nil when there is nothing to say:
-    /// auto-record off, or the detector silent. A live recording always reads as one.
+    /// One-line hint under the meeting button, or nil when there is nothing to say.
+    /// A live recording always reads as one; the "off" case is gated by the menu.
     var detectorStatusLine: String? {
-        guard autoRecordMeetings else { return nil }
         let status: MeetingDetectorStatus = isRecordingMeeting ? .recording : meetingDetectorStatus
         return meetingStatusLine(status, text: strings.meetingStatusText)
     }
