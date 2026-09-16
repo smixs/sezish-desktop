@@ -1,6 +1,5 @@
 @preconcurrency import AVFoundation
 import AudioToolbox
-@preconcurrency import AVFoundation
 import Foundation
 import SezishCore
 
@@ -44,11 +43,18 @@ nonisolated final class MicRecorder: MicCapture, @unchecked Sendable {
     /// A meeting (callback, no buffer) must never accumulate an hour of samples in RAM.
     private let keepsBuffer: Bool
 
+    private let pinnedDeviceID: AudioDeviceID?
+
+    /// `deviceID` is the input this recorder must open — the meeting path, where the
+    /// mic has to be the device the call app listens to. nil leaves the engine on
+    /// whatever it picks itself, which is all dictation ever wants.
     init(
+        deviceID: AudioDeviceID? = nil,
         onLevel: (@Sendable (Float) -> Void)? = nil,
         onSamples16k: (@Sendable ([Float]) -> Void)? = nil,
         keepsBuffer: Bool? = nil
     ) {
+        self.pinnedDeviceID = deviceID
         self.onLevel = onLevel
         self.onSamples16k = onSamples16k
         self.keepsBuffer = keepsBuffer ?? (onSamples16k == nil)
@@ -135,17 +141,6 @@ nonisolated final class MicRecorder: MicCapture, @unchecked Sendable {
     /// the format is read and the tap installed — the format follows the device.
     private func pinInputDevice(_ deviceID: AudioDeviceID?, on input: AVAudioInputNode) throws {
         guard let deviceID else { return }
-        do {
-            try input.auAudioUnit.setDeviceID(deviceID)
-        } catch {
-            throw MicError.deviceUnavailable(error)
-        }
-    }
-
-    /// Pin the engine's input to one device. `AUAudioUnit.setDeviceID` is the only
-    /// way to do that on an `AVAudioEngine`, and it has to happen before the format
-    /// is read and the tap installed — the format follows the device.
-    private func pinInputDevice(_ deviceID: AudioDeviceID, on input: AVAudioInputNode) throws {
         do {
             try input.auAudioUnit.setDeviceID(deviceID)
         } catch {

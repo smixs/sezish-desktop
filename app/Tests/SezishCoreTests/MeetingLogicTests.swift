@@ -566,3 +566,26 @@ struct MeetingCallAppDisplayNameTests {
         #expect(app?.displayName == nil)
     }
 }
+
+struct MeetingMicRouteTests {
+    private let headset = MicDevice(id: 42, name: "Zoom Headset", isVirtual: false)
+    private let usb = MicDevice(id: 43, name: "USB Microphone", isVirtual: false)
+    private let loopback = MicDevice(id: 57, name: "ZoomAudioDevice", isVirtual: true)
+    private let aggregate = MicDevice(id: 58, name: "Aggregate", isVirtual: true)
+
+    /// The first real device of the call app wins. A virtual one is not a microphone
+    /// even when it comes first: Zoom's own loopback is always the first device of
+    /// Zoom's process, and it hands the engine zero frames — a mic track that would be
+    /// silence is the same defect as recording the room.
+    @Test func aRealCallAppInputWinsOverAVirtualOne() {
+        #expect(MeetingMicRoute.device(callAppInputs: [loopback, headset, usb]) == headset)
+        #expect(MeetingMicRoute.device(callAppInputs: [aggregate, headset]) == headset)
+    }
+
+    /// Only virtual devices: nothing to record from, so the engine opens whatever it
+    /// picks — exactly what dictation has always done.
+    @Test func onlyVirtualCallAppInputsLeaveTheRouteToTheEngine() {
+        #expect(MeetingMicRoute.device(callAppInputs: [loopback, aggregate]) == nil)
+        #expect(MeetingMicRoute.device(callAppInputs: []) == nil)
+    }
+}

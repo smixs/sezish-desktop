@@ -77,7 +77,7 @@ extension AudioObjectID {
     /// This device as a route candidate: the id CoreAudio opens it by, and the
     /// name the user sees in System Settings.
     nonisolated func readMicDevice() throws -> MicDevice {
-        MicDevice(id: self, name: try readDeviceName())
+        MicDevice(id: self, name: try readDeviceName(), isVirtual: false)
     }
 
     nonisolated func readDeviceName() throws -> String {

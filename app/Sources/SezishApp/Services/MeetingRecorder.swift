@@ -7,6 +7,23 @@ import SezishCore
 /// both spooled to disk, mixed to one mono track on stop.
 @MainActor
 final class MeetingRecorder {
+    /// Builds this recording's microphone. Injectable because the device id handed over
+    /// here is the whole mic route, and nothing else in the app can see what reached it.
+    typealias MicFactory = (AudioDeviceID?, @escaping @Sendable ([Float]) -> Void) -> MicCapture
+
+    private let makeMic: MicFactory
+
+    init(makeMic: @escaping MicFactory = MeetingRecorder.engineMic) {
+        self.makeMic = makeMic
+    }
+
+    /// The real mic: a fresh `AVAudioEngine`, pinned to `deviceID` before the format is
+    /// read and the tap installed. nil is the engine's own default — dictation's way.
+    nonisolated static func engineMic(
+        deviceID: AudioDeviceID?, onSamples16k: @escaping @Sendable ([Float]) -> Void
+    ) -> MicCapture {
+        MicRecorder(deviceID: deviceID, onSamples16k: onSamples16k)
+    }
     enum StartOutcome {
         case full
         /// System-audio tap failed (typically TCC denied): recording continues
@@ -25,7 +42,7 @@ final class MeetingRecorder {
         case notRecording
     }
 
-    private var mic: MicRecorder?
+    private var mic: (any MicCapture)?
     private var tap: SystemAudioTap?
     private var micStem: MeetingStem?
     private var systemStem: MeetingStem?
@@ -66,12 +83,13 @@ final class MeetingRecorder {
         )
 
         // Mic first: the user's own voice is the non-negotiable half.
-        let mic = MicRecorder(onSamples16k: {
+        // (The received device is handed over in the following commit.)
+        let mic = makeMic(nil) {
             micStem.ingest($0)
             pipeline?.ingestMic($0)
-        })
+        }
         do {
-            try mic.start(deviceID: device)
+            try mic.start()
         } catch {
             try? FileManager.default.removeItem(at: dir)
             throw error

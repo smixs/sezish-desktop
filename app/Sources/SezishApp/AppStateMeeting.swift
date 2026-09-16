@@ -345,41 +345,29 @@ extension AppState {
         return coverage
     }
 
-    /// The microphone the meeting records: the one the call app listens to, else
-    /// the system default, else nothing (the engine picks its own). Decided once,
-    /// before the engine opens: an app that moves to another device mid-call is
-    /// deliberately not followed, so one line says what was chosen and why. The
-    /// family's processes come from the same snapshot the tap used.
+    /// The microphone the meeting records: the real device the call app listens to, or
+    /// nothing — and nothing means the engine opens its own input, exactly as it always
+    /// has for dictation. Pinning a device nobody asked for only adds a way to fail.
+    /// Decided once, before the engine opens: an app that moves to another device
+    /// mid-call is deliberately not followed. The family's processes come from the same
+    /// snapshot the tap used.
     private func resolveMeetingMicDevice(
         for callApp: MeetingCallApp?, snapshot: AudioProcessSnapshot
     ) -> MicDevice? {
         let callAppInputs = callApp?.inputDevices(in: snapshot) ?? []
-        let chosen = MeetingMicRoute.device(
-            callAppInputs: callAppInputs, default: Self.systemMicDevice()
-        )
-        logMeetingMic(chosen, callAppInputs: callAppInputs)
+        let chosen = MeetingMicRoute.device(callAppInputs: callAppInputs)
+        logMeetingMic(chosen)
         return chosen
     }
 
-    /// The system default input, nil when there is none or it cannot be named. The
-    /// engine opening the default anyway makes that a real answer rather than a
-    /// failure to record.
-    private static func systemMicDevice() -> MicDevice? {
-        guard let device = try? AudioObjectID.readDefaultInputDevice(), device.isValid else {
-            return nil
-        }
-        return try? device.readMicDevice()
-    }
-
-    /// Which device the mic follows and why — the two cases look identical in the
-    /// log whenever the call app happens to sit on the system input.
-    private func logMeetingMic(_ device: MicDevice?, callAppInputs: [MicDevice]) {
+    /// Which device the mic follows, or that the engine picks its own — the two cases
+    /// look identical in the audio, and only the log tells them apart.
+    private func logMeetingMic(_ device: MicDevice?) {
         guard let device else {
-            meetingMicLog.notice("meeting mic: engine default (no call app input, no system default)")
+            meetingMicLog.notice("meeting mic: engine default (call app holds no real input)")
             return
         }
-        let source = callAppInputs.contains(device) ? "call app" : "system default"
-        meetingMicLog.notice("meeting mic: \(device.name, privacy: .public) (\(source, privacy: .public))")
+        meetingMicLog.notice("meeting mic: \(device.name, privacy: .public) (call app)")
     }
 
     func stopMeetingRecording() {
