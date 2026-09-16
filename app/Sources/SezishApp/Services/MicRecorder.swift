@@ -60,17 +60,19 @@ nonisolated final class MicRecorder: MicCapture, @unchecked Sendable {
         self.keepsBuffer = keepsBuffer ?? (onSamples16k == nil)
     }
 
-    /// The dictation path, and the `MicCapture` seam: the engine's own default.
+    /// The dictation path, and the `MicCapture` seam: whatever device this recorder was
+    /// built for — nil is the engine's own default, which is all dictation wants.
     func start() throws {
-        try start(deviceID: nil)
+        try start(deviceID: pinnedDeviceID)
     }
 
     /// `deviceID` pins the engine to one input device — the meeting path, where the
     /// mic has to be the device the call app listens to. nil keeps whatever the
     /// system default is, which is all dictation ever wants. A device that cannot
     /// be opened fails the start with its cause: falling back to the default would
-    /// silently record the room instead of the call.
-    func start(deviceID: AudioDeviceID?) throws {
+    /// silently record the room instead of the call. Called through the stored device
+    /// for the engine's own default.
+    private func start(deviceID: AudioDeviceID?) throws {
         try ensurePermission()
 
         let engine = AVAudioEngine()

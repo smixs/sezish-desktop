@@ -83,8 +83,7 @@ final class MeetingRecorder {
         )
 
         // Mic first: the user's own voice is the non-negotiable half.
-        // (The received device is handed over in the following commit.)
-        let mic = makeMic(nil) {
+        let mic = makeMic(device) {
             micStem.ingest($0)
             pipeline?.ingestMic($0)
         }

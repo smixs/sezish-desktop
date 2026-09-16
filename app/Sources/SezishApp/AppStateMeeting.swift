@@ -6,12 +6,8 @@ import SezishCore
 import os
 
 /// One line per meeting start about the system stem — what it holds, and when the
-/// only thing left to hold is the whole Mac.
+/// only thing left to hold is the whole Mac. Same subsystem as every other log.
 private let systemTapLog = Logger(subsystem: "com.smixs.sezish", category: "system-tap")
-
-/// One line per meeting start about the mic — which input it follows, and why.
-/// Same subsystem and `log show` predicate as every other log in the app.
-private let meetingMicLog = Logger(subsystem: "com.smixs.sezish", category: "mic-route")
 
 /// Meeting recording lifecycle for `AppState`. Split out like AppState+Model to
 /// keep the state file on UI/hotkey wiring.
@@ -65,6 +61,12 @@ extension AppState {
             meetingWasAutoStarted = source.isAuto
             presentMeetingStart(outcome: outcome, auto: source.isAuto)
         } catch {
+            // The one place a failed start is not swallowed: the cause (an OSStatus from
+            // pinning the call app's device, a denied tap, a disk error) is what tells
+            // the user why the meeting is missing.
+            micRouteLog.error(
+                "meeting start failed: \(error.localizedDescription, privacy: .public)"
+            )
             meetingStartFailed(pipeline)
         }
     }
@@ -364,10 +366,10 @@ extension AppState {
     /// look identical in the audio, and only the log tells them apart.
     private func logMeetingMic(_ device: MicDevice?) {
         guard let device else {
-            meetingMicLog.notice("meeting mic: engine default (call app holds no real input)")
+            micRouteLog.notice("meeting mic: engine default (call app holds no real input)")
             return
         }
-        meetingMicLog.notice("meeting mic: \(device.name, privacy: .public) (call app)")
+        micRouteLog.notice("meeting mic: \(device.name, privacy: .public) (call app)")
     }
 
     func stopMeetingRecording() {

@@ -26,6 +26,6 @@ public enum MeetingMicRoute {
     /// the call app the answer is nil — the engine picks its own input, exactly what
     /// dictation has always done, and a device nobody asked for is never pinned.
     public static func device(callAppInputs: [MicDevice]) -> MicDevice? {
-        callAppInputs.first
+        callAppInputs.first { !$0.isVirtual }
     }
 }
