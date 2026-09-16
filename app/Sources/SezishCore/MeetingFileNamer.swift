@@ -82,14 +82,11 @@ public enum MeetingFileNamer {
         isCollisionNumber(part) || isSlug(part)
     }
 
+    /// A slug is exactly what `appSlug` writes: this keeps the reader in lockstep
+    /// with the writer, so every name `baseName(for:app:)` produces reads back.
     private static func isSlug(_ part: Substring) -> Bool {
-        guard !part.isEmpty, part.count <= maxSlugLength else { return false }
-        // Lowercase ASCII only, like `appSlug` writes: a hand-capitalised tail
-        // is not a name this type wrote.
-        guard part.allSatisfy({ $0.isASCII && ($0.isNumber || ("a"..."z").contains($0)) }) else {
-            return false
-        }
-        return part.contains(where: { ("a"..."z").contains($0) })
+        guard let slug = appSlug(from: String(part)) else { return false }
+        return slug == String(part)
     }
 
     private static func isCollisionNumber(_ part: Substring) -> Bool {
