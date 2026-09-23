@@ -55,7 +55,7 @@ public enum SummaryPromptBuilder {
 
         ---
         type: meeting | contact | project | decision
-        description: one-line search snippet, NEVER a repeat of the title
+        description: one-line search snippet, not a repeat of the title
         tags: [2-5 tags, lowercase, kebab-case]
         status: active
         created: YYYY-MM-DD
@@ -80,9 +80,10 @@ public enum SummaryPromptBuilder {
         - sezish/decisions/ — type: decision
         - sezish/_index.md  — the hub. Create it with a heading and a links list if absent.
 
-        WORKFLOW (mandatory order)
+        WORKFLOW
         1. LOOKUP FIRST. Before writing any entity, search the existing cards (grep/glob
-           across the vault) for it. NEVER create a near-duplicate of a card that exists.
+           across the vault) for it, and work on the card that exists instead of creating
+           a near-duplicate.
         2. For each entity decide exactly one of:
            ADD       — no card exists yet; create one.
            NOOP      — a card exists and the transcript adds nothing; leave it alone.
@@ -90,18 +91,18 @@ public enum SummaryPromptBuilder {
                        line to `## Log`.
            SUPERSEDE — a new fact contradicts a stored one; rewrite the field and move the
                        old value into an append-only `## History` section with a date range.
-        3. ALWAYS create exactly one meeting card in sezish/meetings/. Derive its filename
+        3. Create exactly one meeting card in sezish/meetings/. Derive its filename
            from the meeting file's basename. It holds: the date, the participants (linked),
            and a faithful summary — key points, decisions with owners, action items with
            owners and deadlines, open questions — plus `## Related` links to every entity
            card you touched.
         4. Entities: fewer but richer. Only significant people, projects and decisions.
            Skip logistics, small talk and transient status.
-        5. LINKING PROTOCOL (mandatory). Every new card's `## Related` links the hub
+        5. Linking. Every new card's `## Related` links the hub
            [[sezish/_index]] plus 2-3 sibling cards, and the new card goes into the hub's
            link list.
 
-        ANTI-PATTERNS (forbidden)
+        ANTI-PATTERNS
         - A `description` that repeats the title.
         - No tags, or more than 5 tags.
         - A card for trivia.
@@ -111,6 +112,10 @@ public enum SummaryPromptBuilder {
         OUTPUT LANGUAGE
         Write all card content — titles, descriptions, prose, log lines — in \(languageName).
         Frontmatter keys and `type` values stay English.
+
+        LENGTH
+        Match each card's length to what the transcript supports: cover the substance,
+        but do not pad cards with filler sections, redundant summaries or boilerplate.
 
         BOUNDARIES
         - Modify files ONLY inside the vault at \(notesFolderPath).
