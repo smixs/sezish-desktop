@@ -104,7 +104,7 @@ public enum SummaryPromptBuilder {
 
         ANTI-PATTERNS
         - A `description` that repeats the title.
-        - No tags, or more than 5 tags.
+        - Fewer than 2 or more than 5 tags.
         - A card for trivia.
         - Two contradictory current values for the same fact — use SUPERSEDE instead.
         - Editing lines that already exist under `## History`.
