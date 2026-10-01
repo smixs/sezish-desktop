@@ -37,9 +37,9 @@ nonisolated struct SummaryRunner {
     /// - Parameters:
     ///   - codexHome: `CODEX_HOME` for our own private codex install; ignored for a
     ///     codex the user installed themselves. Same default as `EngineLocator`.
-    ///   - timeout: wall-clock ceiling for the whole CLI run. Ten minutes because an
-    ///     agent reading an hour-long transcript and writing a handful of cards takes
-    ///     minutes, not seconds — but a wedged one must still end.
+    ///   - timeout: fixed per-attempt ceiling; nil (the app) sizes it from the transcript
+    ///     with `timeout(forTranscriptBytes:)`. Tests pass a short one for a wedged CLI.
+    ///   - now: the clock behind the "card is newer than the attempt" check.
     ///   - logURL: the field-diagnostics log. There is no UI for any of this, so the
     ///     file is the only place a user can find out what their CLI said.
     init(
@@ -62,11 +62,24 @@ nonisolated struct SummaryRunner {
     static let codexModel = "gpt-6-luna"
     static let codexEffort = "max"
 
-    static let maxTurns = 15
-    static let maxAttempts = 1
+    /// First try plus two retries (owner's decision 01.10.2026).
+    static let maxAttempts = 3
 
-    static func timeout(forTranscriptBytes bytes: Int) -> TimeInterval { 600 }
-    private var timeout: TimeInterval { fixedTimeout ?? 600 }
+    /// The old 15 turns ran out on long meetings: a transcript read in chunks takes a
+    /// turn per chunk (an hour is a handful, two hours about twenty), then one Write per
+    /// card (a meeting plus a few people, projects and decisions), then Edits to link
+    /// them. 60 leaves that room with slack; the wall-clock timeout, not the turn cap,
+    /// is what ends a wedged run.
+    static let maxTurns = 60
+
+    /// Wall-clock ceiling for one attempt. 600 s is what a short meeting needed (the
+    /// old fixed ceiling). A transcript is about 100 KB per hour of speech, and with
+    /// `high` effort the agent needs roughly ten more minutes for every such hour, so
+    /// each 100 KB adds 600 s. 1800 s is the ceiling: past half an hour a run is more
+    /// likely stuck than slow, and three attempts at it already cost an hour and a half.
+    static func timeout(forTranscriptBytes bytes: Int) -> TimeInterval {
+        min(1800, 600 + 600 * Double(max(0, bytes)) / 100_000)
+    }
 
     private static var defaultLogURL: URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)
@@ -116,16 +129,37 @@ nonisolated struct SummaryRunner {
             meetingMdPath: meetingMd.path,
             notesFolderPath: notesFolder.path
         )
-        log("run \(name) via \(binary.path) (timeout \(Int(timeout))s)", engine: engine)
+        let attemptTimeout =
+            fixedTimeout ?? Self.timeout(forTranscriptBytes: md.utf8.count)
+        let base = meetingMd.deletingPathExtension().lastPathComponent
+        let card = notesFolder
+            .appendingPathComponent("\(SummaryVault.subdirectory)/\(SummaryVault.meetingsDir)")
+            .appendingPathComponent(base + ".md")
 
-        let reason = switch engine {
-        case .claude:
-            await runClaude(
-                binary: binary, prompt: prompt, meetingMd: meetingMd, notesFolder: notesFolder)
-        case .codex:
-            await runCodex(binary: binary, prompt: prompt, notesFolder: notesFolder)
+                for attempt in 1...Self.maxAttempts {
+            let started = now()
+            log(
+                "attempt \(attempt)/\(Self.maxAttempts) \(name) via \(binary.path) (timeout \(Int(attemptTimeout))s)",
+                engine: engine)
+
+            let reason: String? =
+                switch engine {
+                case .claude:
+                    await runClaude(
+                        binary: binary, prompt: prompt, meetingMd: meetingMd,
+                        notesFolder: notesFolder, timeout: attemptTimeout)
+                case .codex:
+                    await runCodex(
+                        binary: binary, prompt: prompt, notesFolder: notesFolder,
+                        timeout: attemptTimeout)
+                }
+            // A clean exit proves nothing: the agent can finish happily having written
+            // no card at all. The card itself, fresh for THIS attempt, is the proof.
+            let failed = reason ?? (Self.cardIsFresh(card, since: started) ? nil : "no meeting card written")
+            guard let failed else { break }
+            log("attempt \(attempt)/\(Self.maxAttempts) failed: \(failed)", engine: engine)
+            if attempt == Self.maxAttempts { return failure(failed, engine: engine) }
         }
-        if let reason { return failure(reason, engine: engine) }
 
         do {
             try SummaryMarker.append(to: meetingMd, date: Date())
@@ -137,6 +171,14 @@ nonisolated struct SummaryRunner {
         }
         log("done \(name)", engine: engine)
         return .done
+    }
+
+    private static func cardIsFresh(_ card: URL, since started: Date) -> Bool {
+        guard
+            let modified = (try? FileManager.default.attributesOfItem(atPath: card.path))?[
+                .modificationDate] as? Date
+        else { return false }
+        return modified >= started
     }
 
     /// Puts `<notesFolder>/transcripts/YYYY/MM/<base>-transcript.md` in place: the
@@ -197,7 +239,7 @@ nonisolated struct SummaryRunner {
 
     /// - Returns: `nil` when the engine did its job, otherwise why we think it did not.
     private func runClaude(
-        binary: URL, prompt: String, meetingMd: URL, notesFolder: URL
+        binary: URL, prompt: String, meetingMd: URL, notesFolder: URL, timeout: TimeInterval
     ) async -> String? {
         let arguments = [
             "-p",
@@ -212,7 +254,7 @@ nonisolated struct SummaryRunner {
             "--allowedTools", "Read,Write,Edit,Grep,Glob",
             "--model", Self.claudeModel,
             "--effort", Self.claudeEffort,
-            "--max-turns", "15",
+            "--max-turns", String(Self.maxTurns),
             "--no-session-persistence",
             "--output-format", "json",
             // The transcript lives in the app's meetings folder, outside the vault the
@@ -279,7 +321,9 @@ nonisolated struct SummaryRunner {
 
     // MARK: - Codex adapter
 
-    private func runCodex(binary: URL, prompt: String, notesFolder: URL) async -> String? {
+    private func runCodex(
+        binary: URL, prompt: String, notesFolder: URL, timeout: TimeInterval
+    ) async -> String? {
         let lastMessage = FileManager.default.temporaryDirectory
             .appendingPathComponent("sezish-summary-\(UUID().uuidString).txt")
         defer { try? FileManager.default.removeItem(at: lastMessage) }

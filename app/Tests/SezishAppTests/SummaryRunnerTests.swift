@@ -86,6 +86,7 @@ import Testing
     private static func claudeSuccessBranch(
         envSink: URL,
         argvSink: URL? = nil,
+        cardName: String = "2026-07-30 11-00 call.md",
         envelope: String = #"[{"type":"system"},{"type":"result","is_error":false}]"#
     ) -> String {
         let dumpArgv =
@@ -98,7 +99,7 @@ import Testing
         return """
             \(dumpArgv)
                 printf '%s' "${ANTHROPIC_API_KEY:-UNSET}" > '\(envSink.path)'
-                printf 'card' > "$PWD/sezish/meetings/2026-07-30 11-00 call.md"
+                printf 'card' > "$PWD/sezish/meetings/\(cardName)"
                 cat <<'ENVELOPE'
             \(envelope)
             ENVELOPE
@@ -781,7 +782,7 @@ import Testing
         let script = root.appendingPathComponent("bin/claude")
         try Self.writeScript(
             Self.claudeScript(
-                counter: counter, onPrompt: Self.claudeSuccessBranch(envSink: envSink)),
+                counter: counter, onPrompt: Self.claudeSuccessBranch(envSink: envSink, cardName: "call-2026-09-04-12-01.md")),
             to: script)
         let notes = root.appendingPathComponent("notes", isDirectory: true)
         try FileManager.default.createDirectory(at: notes, withIntermediateDirectories: true)

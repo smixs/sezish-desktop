@@ -126,6 +126,7 @@ final class AppState {
     @ObservationIgnored let downloader = ModelDownloader()
     @ObservationIgnored let history: DictationHistory?
     @ObservationIgnored let notifier = Notifier()
+    @ObservationIgnored var summaryGate = SummaryRunGate()
     @ObservationIgnored var coordinator: DictationCoordinator?
     /// The transcriber the coordinator uses; shared with the meeting pipeline so a
     /// local model is never loaded twice.
@@ -178,6 +179,7 @@ final class AppState {
 
         autoRecordMeetings = settings.autoRecordMeetings
         soundsEnabled = settings.playSounds
+        notifier.onSummaryRetry = { [weak self] md in self?.retrySummary(meetingMd: md) }
         notifier.prepare()
         salvageOrphanedMeetingsAtLaunch()
         // Stems parked by an earlier session; the salvage task refreshes this

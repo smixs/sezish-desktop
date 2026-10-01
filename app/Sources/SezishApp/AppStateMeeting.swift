@@ -251,8 +251,10 @@ extension AppState {
         let summaryEnabled: Bool
         let summaryEngine: SummaryEngineKind
         let notesFolder: URL?
+        let state: AppState
 
         init(_ state: AppState) {
+            self.state = state
             strings = state.strings
             language = state.language
             notifier = state.notifier
@@ -280,13 +282,52 @@ extension AppState {
         await MainActor.run { context.notifier.notify(title: "sezish", body: body) }
 
         guard context.summaryEnabled, let notesFolder = context.notesFolder else { return }
-        let summary = await SummaryRunner().summarize(
-            meetingMd: md, notesFolder: notesFolder,
-            engine: context.summaryEngine, language: context.language
+        await performSummary(
+            md: md,
+            input: SummaryRunInput(
+                engine: context.summaryEngine, language: context.language,
+                strings: context.strings, notesFolder: notesFolder,
+                notifier: context.notifier, state: context.state))
+    }
+
+    /// What one summary cycle needs, read on the main actor and handed to a task.
+    struct SummaryRunInput: Sendable {
+        let engine: SummaryEngineKind
+        let language: AppLanguage
+        let strings: Strings
+        let notesFolder: URL
+        let notifier: Notifier
+        let state: AppState
+    }
+
+    /// One cycle (up to three attempts inside the runner) plus its banner. A meeting
+    /// that already has a cycle running is left alone, so a second press of "retry" or
+    /// a late recovery cannot put two agents on the same cards.
+    nonisolated static func performSummary(md: URL, input: SummaryRunInput) async {
+        guard await MainActor.run(body: { input.state.claimSummary(md) }) else { return }
+        let outcome = await SummaryRunner().summarize(
+            meetingMd: md, notesFolder: input.notesFolder,
+            engine: input.engine, language: input.language
         )
-        if let banner = Self.summaryNotification(summary, strings: context.strings) {
-            await MainActor.run { context.notifier.notify(title: "sezish", body: banner) }
+        await MainActor.run {
+            input.state.releaseSummary(md)
+            guard let body = Self.summaryNotification(outcome, strings: input.strings) else {
+                return
+            }
+            input.notifier.notify(
+                title: "sezish", body: body,
+                retry: Self.summaryOffersRetry(outcome)
+                    ? (meeting: md, actionTitle: input.strings.notifSummaryRetryAction) : nil)
         }
+    }
+
+    func claimSummary(_ md: URL) -> Bool { summaryGate.begin(md) }
+    func releaseSummary(_ md: URL) { summaryGate.end(md) }
+
+    /// The banner's "retry" button. Settings are read now, not when the meeting ended:
+    /// the user may have switched engine or notes folder since.
+    func retrySummary(meetingMd: URL) {
+        startSummary(meetingMd: meetingMd, hasTranscript: true)
     }
 
     /// Recognises the stems of meetings that never got a transcript, one meeting
@@ -672,19 +713,12 @@ extension AppState {
 
         // Read on the main actor and captured, like the strings and the notifier: the
         // detached task must not reach back into AppState for any of it.
-        let engine = settings.summaryEngine
-        let language = language
-        let strings = strings
-        let notifier = notifier
+        let input = SummaryRunInput(
+            engine: settings.summaryEngine, language: language, strings: strings,
+            notesFolder: notesFolder, notifier: notifier, state: self)
 
         Task.detached(priority: .utility) {
-            let outcome = await SummaryRunner().summarize(
-                meetingMd: meetingMd, notesFolder: notesFolder,
-                engine: engine, language: language
-            )
-            if let body = Self.summaryNotification(outcome, strings: strings) {
-                await MainActor.run { notifier.notify(title: "sezish", body: body) }
-            }
+            await Self.performSummary(md: meetingMd, input: input)
         }
     }
 
@@ -700,7 +734,11 @@ extension AppState {
         }
     }
 
-    nonisolated static func summaryOffersRetry(_ outcome: SummaryOutcome) -> Bool { false }
+    /// A button only where there is something to retry; a skip has nothing to offer.
+    nonisolated static func summaryOffersRetry(_ outcome: SummaryOutcome) -> Bool {
+        if case .failed = outcome { return true }
+        return false
+    }
 
     /// The setting round-trips through `URL(string:)`, so it comes back either as a
     /// `file:` URL or — when someone set it with `defaults write` — as a bare path with
