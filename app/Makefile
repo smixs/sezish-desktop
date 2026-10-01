@@ -11,7 +11,7 @@ CLOUD_KEY_FILE = ../cloud/.api-key
 SIGN_ID   ?= $(shell security find-identity -v -p codesigning 2>/dev/null | grep -q "Sezish Dev" && echo "Sezish Dev")
 SIGN_FLAGS ?=
 # Distribution identity: Developer ID + hardened runtime, required for notarization.
-DIST_SIGN_ID = Developer ID Application: Timurkhuja Latipov (WW2ZW8XUX3)
+DIST_SIGN_ID = Developer ID Application: MAJENTO, MCHJ (M37N642Q58)
 DIST_SIGN_FLAGS = --options runtime --timestamp
 # Sparkle 2 (auto-update). SwiftPM downloads it as a binary artifact on `swift build`;
 # the framework itself sits inside the xcframework, the CLI tools next to it.
@@ -119,15 +119,15 @@ dist:
 	scripts/make-dmg.sh "$(APP_BUNDLE)" "build/sezish-$(VERSION).dmg"
 
 # One-time setup (any team member's Apple ID + its app-specific password):
-#   xcrun notarytool store-credentials sezish-notary \
-#     --apple-id <apple-id> --team-id WW2ZW8XUX3 --password <app-specific-password>
+#   xcrun notarytool store-credentials majento-notary \
+#     --apple-id <apple-id> --team-id M37N642Q58 --password <app-specific-password>
 notarize:
-	xcrun notarytool submit build/sezish-app.zip --keychain-profile sezish-notary --wait
+	xcrun notarytool submit build/sezish-app.zip --keychain-profile majento-notary --wait
 	xcrun stapler staple "$(APP_BUNDLE)"
 	@rm -f build/sezish-app.zip
 	@ditto -c -k --keepParent "$(APP_BUNDLE)" build/sezish-app.zip
 	codesign --force --timestamp --sign "$(DIST_SIGN_ID)" "build/sezish-$(VERSION).dmg"
-	xcrun notarytool submit "build/sezish-$(VERSION).dmg" --keychain-profile sezish-notary --wait
+	xcrun notarytool submit "build/sezish-$(VERSION).dmg" --keychain-profile majento-notary --wait
 	xcrun stapler staple "build/sezish-$(VERSION).dmg"
 
 # One-time Sparkle setup. generate_keys stores the private EdDSA key in the login

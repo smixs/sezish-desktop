@@ -38,7 +38,7 @@ Ecosystem outside this tree (no code here, but agents should know it exists):
 
 Release specifics:
 
-- **macOS** — `make release` runs dist → notarize → appcast → deploy, rsyncing into `cx:/opt/sezish-dl`. Notarization uses the keychain profile `sezish-notary`; the Developer ID certificate is valid until 2027-02-01.
+- **macOS** — `make release` runs dist → notarize → appcast → deploy, rsyncing into `cx:/opt/sezish-dl`. signed with Developer ID MAJENTO, MCHJ (M37N642Q58), keychain notary profile `majento-notary`; the certificate is valid until 2027-02-01.
 - **Windows** — CI runs fmt + clippy + test on macOS and Windows; a `win-v*` tag builds the release, signs it with minisign, and produces `dl.sezi.sh/win/latest.json`. The CI artifact is uploaded to the server by hand. Requires repo secrets `SEZISH_CLOUD_ENDPOINT`, `SEZISH_CLOUD_KEY`, `TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`.
 
 ## Rules
