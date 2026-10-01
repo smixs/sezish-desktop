@@ -51,6 +51,20 @@ import Testing
         #expect(prompt(.ru).contains("Modify files ONLY inside the vault"))
     }
 
+    @Test func promptNamesTheMeetingCardAndTheTranscriptLink() {
+        let text = prompt(.ru)
+        // Basename of the meeting file, no extension: the card name and the link
+        // target are both derived from it, so the app can verify the card later.
+        #expect(text.contains("sezish/meetings/call-2026-07-30-14-32.md"))
+        #expect(text.contains("- [[call-2026-07-30-14-32-transcript]]"))
+    }
+
+    @Test func promptAsksForChunkedReadingToTheEnd() {
+        let text = prompt(.uz)
+        #expect(text.contains("offset"))
+        #expect(text.contains("limit"))
+    }
+
     @Test func promptNeverTeachesTheMarker() {
         // The app stamps the marker after a successful run. If the agent learned the
         // syntax it could stamp a summary it never wrote, and the next run would skip.
@@ -112,5 +126,42 @@ import Testing
         // Two markers: append never inspects the file. `isPresent` is the guard.
         let after = try String(contentsOf: url, encoding: .utf8)
         #expect(after.components(separatedBy: "<!-- sezish-summary:").count - 1 == 2)
+    }
+}
+
+@Suite struct SummaryTranscriptCopyTests {
+    private let utc: Calendar = {
+        var c = Calendar(identifier: .gregorian)
+        c.timeZone = TimeZone(identifier: "UTC")!
+        return c
+    }()
+
+    @Test func pathFollowsTheDateInTheName() {
+        let path = SummaryTranscriptCopy.relativePath(
+            baseName: "call-2026-09-04-12-01", fallbackDate: Date(timeIntervalSince1970: 0),
+            calendar: utc)
+        #expect(path == "transcripts/2026/09/call-2026-09-04-12-01-transcript.md")
+    }
+
+    @Test func appSlugAndCollisionSuffixKeepTheirPlace() {
+        let path = SummaryTranscriptCopy.relativePath(
+            baseName: "call-2026-12-31-23-59-telegram-2",
+            fallbackDate: Date(timeIntervalSince1970: 0), calendar: utc)
+        #expect(path == "transcripts/2026/12/call-2026-12-31-23-59-telegram-2-transcript.md")
+    }
+
+    @Test func unknownNameFallsBackToTheFileDate() {
+        // 2026-07-15 12:00 UTC.
+        let date = Date(timeIntervalSince1970: 1_784_116_800)
+        let path = SummaryTranscriptCopy.relativePath(
+            baseName: "2026-03-01 11-00 call", fallbackDate: date, calendar: utc)
+        #expect(path == "transcripts/2026/07/2026-03-01 11-00 call-transcript.md")
+    }
+
+    @Test func strippedDropsOnlyTheMarkerLine() {
+        let original = "# Call\n\n[0:01] Я: привет\n"
+        let stamped = original + "\n" + SummaryMarker.line(date: Date())
+        #expect(SummaryMarker.stripped(from: stamped) == original)
+        #expect(SummaryMarker.stripped(from: original) == original)
     }
 }

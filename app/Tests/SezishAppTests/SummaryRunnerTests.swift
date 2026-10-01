@@ -615,4 +615,220 @@ import Testing
         }
         #expect(Self.read(notes.appendingPathComponent("sezish/meetings/card.md")) == "card")
     }
+
+    // MARK: - 9. Models, transcript copy
+
+    /// A claude fixture that records argv and whether the transcript copy already
+    /// existed when the agent started.
+    private static func orderProbeScript(
+        counter: URL, argvSink: URL, copyProbe: URL, copyPath: URL
+    ) -> String {
+        claudeScript(
+            counter: counter,
+            onPrompt: """
+                : > '\(argvSink.path)'
+                for a in "$@"; do printf '%s\\037' "$a" >> '\(argvSink.path)'; done
+                if [ -f '\(copyPath.path)' ]; then echo yes > '\(copyProbe.path)'; else echo no > '\(copyProbe.path)'; fi
+                printf 'card' > "$PWD/sezish/meetings/card.md"
+                echo '{"type":"result","is_error":false}'
+                """)
+    }
+
+    @Test func claudeRunsWithTheChosenModelAndEffort() async throws {
+        let root = try Self.makeTempDir()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let counter = root.appendingPathComponent("invocations.txt")
+        let envSink = root.appendingPathComponent("seen-api-key.txt")
+        let argvSink = root.appendingPathComponent("seen-argv.txt")
+        let script = root.appendingPathComponent("bin/claude")
+        try Self.writeScript(
+            Self.claudeScript(
+                counter: counter,
+                onPrompt: Self.claudeSuccessBranch(envSink: envSink, argvSink: argvSink)),
+            to: script)
+        let notes = root.appendingPathComponent("notes", isDirectory: true)
+        try FileManager.default.createDirectory(at: notes, withIntermediateDirectories: true)
+        let md = try Self.writeMeetingMd(in: root)
+
+        let runner = SummaryRunner(
+            locator: EngineLocator(claudeCandidates: [script]),
+            logURL: root.appendingPathComponent("logs/summary.log"))
+        _ = await runner.summarize(
+            meetingMd: md, notesFolder: notes, engine: .claude, language: .ru)
+
+        let argv = Self.capturedArgv(argvSink)
+        let model = try #require(argv.firstIndex(of: "--model"))
+        #expect(argv[model + 1] == "claude-sonnet-5-5")
+        let effort = try #require(argv.firstIndex(of: "--effort"))
+        #expect(argv[effort + 1] == "high")
+        // Safety flags stay.
+        #expect(argv.contains("--safe-mode"))
+        #expect(argv.contains("--no-session-persistence"))
+    }
+
+    @Test func codexRunsWithTheChosenModelAndEffort() async throws {
+        let root = try Self.makeTempDir()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let argvSink = root.appendingPathComponent("seen-argv.txt")
+        let script = root.appendingPathComponent("bin/codex")
+        try Self.writeScript(
+            """
+            case "$1" in
+              --version) echo 'codex-cli 0.146.0' ;;
+              login) exit 0 ;;
+              exec)
+                : > '\(argvSink.path)'
+                for a in "$@"; do printf '%s\\037' "$a" >> '\(argvSink.path)'; done
+                last=""
+                while [ $# -gt 0 ]; do
+                  if [ "$1" = "--output-last-message" ]; then last="$2"; fi
+                  shift
+                done
+                printf 'done' > "$last"
+                ;;
+            esac
+            """,
+            to: script)
+        let notes = root.appendingPathComponent("notes", isDirectory: true)
+        try FileManager.default.createDirectory(at: notes, withIntermediateDirectories: true)
+        let md = try Self.writeMeetingMd(in: root)
+
+        let runner = SummaryRunner(
+            locator: EngineLocator(codexCandidates: [script]),
+            logURL: root.appendingPathComponent("logs/summary.log"))
+        _ = await runner.summarize(
+            meetingMd: md, notesFolder: notes, engine: .codex, language: .ru)
+
+        let argv = Self.capturedArgv(argvSink)
+        let m = try #require(argv.firstIndex(of: "-m"))
+        #expect(argv[m + 1] == "gpt-6-luna")
+        #expect(argv.contains(#"model_reasoning_effort="max""#))
+        #expect(argv.contains(#"web_search="disabled""#))
+        #expect(argv.contains("--ephemeral"))
+        #expect(argv.contains("workspace-write"))
+    }
+
+    @Test func copiesTheTranscriptIntoTheVaultBeforeTheAgentStarts() async throws {
+        let root = try Self.makeTempDir()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let counter = root.appendingPathComponent("invocations.txt")
+        let argvSink = root.appendingPathComponent("seen-argv.txt")
+        let probe = root.appendingPathComponent("probe.txt")
+        let notes = root.appendingPathComponent("notes", isDirectory: true)
+        try FileManager.default.createDirectory(at: notes, withIntermediateDirectories: true)
+        let copy = notes.appendingPathComponent(
+            "transcripts/2026/09/call-2026-09-04-12-01-transcript.md")
+        let script = root.appendingPathComponent("bin/claude")
+        try Self.writeScript(
+            Self.orderProbeScript(
+                counter: counter, argvSink: argvSink, copyProbe: probe, copyPath: copy),
+            to: script)
+        let md = root.appendingPathComponent("call-2026-09-04-12-01.md")
+        let body = try String(contentsOf: Self.writeMeetingMd(in: root), encoding: .utf8)
+        try body.write(to: md, atomically: true, encoding: .utf8)
+
+        let runner = SummaryRunner(
+            locator: EngineLocator(claudeCandidates: [script]),
+            logURL: root.appendingPathComponent("logs/summary.log"))
+        let outcome = await runner.summarize(
+            meetingMd: md, notesFolder: notes, engine: .claude, language: .ru)
+
+        #expect(outcome == .done)
+        #expect(Self.read(probe).trimmingCharacters(in: .whitespacesAndNewlines) == "yes")
+        // As-is copy: the stamp the app adds afterwards never reaches it.
+        #expect(Self.read(copy) == body)
+        #expect(SummaryMarker.isPresent(in: Self.read(md)))
+        #expect(!SummaryMarker.isPresent(in: Self.read(copy)))
+    }
+
+    @Test func copiesEvenWhenTheEngineIsNotReady() async throws {
+        let root = try Self.makeTempDir()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let counter = root.appendingPathComponent("invocations.txt")
+        let envSink = root.appendingPathComponent("seen-api-key.txt")
+        let script = root.appendingPathComponent("bin/claude")
+        try Self.writeScript(
+            Self.claudeScript(
+                counter: counter, loggedIn: false,
+                onPrompt: Self.claudeSuccessBranch(envSink: envSink)),
+            to: script)
+        let notes = root.appendingPathComponent("notes", isDirectory: true)
+        try FileManager.default.createDirectory(at: notes, withIntermediateDirectories: true)
+        let md = root.appendingPathComponent("call-2026-09-04-12-01.md")
+        try Self.read(try Self.writeMeetingMd(in: root)).write(
+            to: md, atomically: true, encoding: .utf8)
+
+        let runner = SummaryRunner(
+            locator: EngineLocator(claudeCandidates: [script]),
+            logURL: root.appendingPathComponent("logs/summary.log"))
+        let outcome = await runner.summarize(
+            meetingMd: md, notesFolder: notes, engine: .claude, language: .ru)
+
+        #expect(outcome == .skipped)
+        #expect(Self.invocationCount(counter) == 0)
+        let copy = notes.appendingPathComponent(
+            "transcripts/2026/09/call-2026-09-04-12-01-transcript.md")
+        #expect(Self.read(copy).contains("[0:00] Я:"))
+    }
+
+    @Test func refreshesTheCopyOfAnAlreadySummarizedMeeting() async throws {
+        let root = try Self.makeTempDir()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let counter = root.appendingPathComponent("invocations.txt")
+        let envSink = root.appendingPathComponent("seen-api-key.txt")
+        let script = root.appendingPathComponent("bin/claude")
+        try Self.writeScript(
+            Self.claudeScript(
+                counter: counter, onPrompt: Self.claudeSuccessBranch(envSink: envSink)),
+            to: script)
+        let notes = root.appendingPathComponent("notes", isDirectory: true)
+        try FileManager.default.createDirectory(at: notes, withIntermediateDirectories: true)
+        let md = root.appendingPathComponent("call-2026-09-04-12-01.md")
+        let first = Self.read(try Self.writeMeetingMd(in: root))
+        try first.write(to: md, atomically: true, encoding: .utf8)
+        let runner = SummaryRunner(
+            locator: EngineLocator(claudeCandidates: [script]),
+            logURL: root.appendingPathComponent("logs/summary.log"))
+        _ = await runner.summarize(
+            meetingMd: md, notesFolder: notes, engine: .claude, language: .ru)
+
+        // Re-recognition rewrote the meeting, then the marker is still on the file.
+        let edited = first.replacingOccurrences(of: "релиз", with: "запуск")
+        try (edited + "\n" + SummaryMarker.line(date: Date()))
+            .write(to: md, atomically: true, encoding: .utf8)
+        let outcome = await runner.summarize(
+            meetingMd: md, notesFolder: notes, engine: .claude, language: .ru)
+
+        #expect(outcome == .skipped)
+        #expect(Self.invocationCount(counter) == 1)
+        let copy = notes.appendingPathComponent(
+            "transcripts/2026/09/call-2026-09-04-12-01-transcript.md")
+        #expect(Self.read(copy) == edited)
+    }
+
+    @Test func doesNotCopyAMeetingWithoutTranscript() async throws {
+        let root = try Self.makeTempDir()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let counter = root.appendingPathComponent("invocations.txt")
+        let envSink = root.appendingPathComponent("seen-api-key.txt")
+        let script = root.appendingPathComponent("bin/claude")
+        try Self.writeScript(
+            Self.claudeScript(
+                counter: counter, onPrompt: Self.claudeSuccessBranch(envSink: envSink)),
+            to: script)
+        let notes = root.appendingPathComponent("notes", isDirectory: true)
+        try FileManager.default.createDirectory(at: notes, withIntermediateDirectories: true)
+        let md = root.appendingPathComponent("call-2026-09-04-12-01.md")
+        try "# Запись\n\n_Текст не распознался._\n".write(
+            to: md, atomically: true, encoding: .utf8)
+
+        let runner = SummaryRunner(
+            locator: EngineLocator(claudeCandidates: [script]),
+            logURL: root.appendingPathComponent("logs/summary.log"))
+        _ = await runner.summarize(
+            meetingMd: md, notesFolder: notes, engine: .claude, language: .ru)
+
+        #expect(!FileManager.default.fileExists(
+            atPath: notes.appendingPathComponent("transcripts").path))
+    }
 }
