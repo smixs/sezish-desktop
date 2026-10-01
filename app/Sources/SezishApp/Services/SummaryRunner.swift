@@ -53,6 +53,12 @@ nonisolated struct SummaryRunner {
         self.logURL = logURL ?? Self.defaultLogURL
     }
 
+    /// Fixed models for every user (owner's decision 01.10.2026).
+    static let claudeModel = "claude-sonnet-5-5"
+    static let claudeEffort = "high"
+    static let codexModel = "gpt-6-luna"
+    static let codexEffort = "max"
+
     private static var defaultLogURL: URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)
             .first
@@ -76,12 +82,15 @@ nonisolated struct SummaryRunner {
             // Not a guard but a real break: the pipeline just wrote this file.
             return failure("cannot read \(name)", engine: engine)
         }
-        guard !SummaryMarker.isPresent(in: md) else {
-            log("skip \(name): already summarized", engine: engine)
-            return .skipped
-        }
         guard Self.hasTranscript(md) else {
             log("skip \(name): no transcript to summarize", engine: engine)
+            return .skipped
+        }
+        // Before any guard that can skip: the vault copy is the app's own job and does
+        // not depend on the engine, a previous stamp or the outcome of the run.
+        copyTranscript(md, from: meetingMd, to: notesFolder, engine: engine)
+        guard !SummaryMarker.isPresent(in: md) else {
+            log("skip \(name): already summarized", engine: engine)
             return .skipped
         }
 
@@ -119,6 +128,26 @@ nonisolated struct SummaryRunner {
         }
         log("done \(name)", engine: engine)
         return .done
+    }
+
+    /// Puts `<notesFolder>/transcripts/YYYY/MM/<base>-transcript.md` in place: the
+    /// meeting file as is, minus the marker line. Atomic, and it only ever replaces
+    /// this same file. Best-effort: a failed copy is logged and never stops the run.
+    private func copyTranscript(
+        _ md: String, from meetingMd: URL, to notesFolder: URL, engine: SummaryEngineKind
+    ) {
+        let base = meetingMd.deletingPathExtension().lastPathComponent
+        let modified = (try? FileManager.default.attributesOfItem(atPath: meetingMd.path))?[
+            .modificationDate] as? Date ?? Date()
+        let target = notesFolder.appendingPathComponent(
+            SummaryTranscriptCopy.relativePath(baseName: base, fallbackDate: modified))
+        do {
+            try FileManager.default.createDirectory(
+                at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data(SummaryMarker.stripped(from: md).utf8).write(to: target, options: .atomic)
+        } catch {
+            log("warning: transcript copy to vault failed: \(error)", engine: engine)
+        }
     }
 
     /// A transcript segment always renders as "[m:ss] …" — our own format, so the
@@ -172,6 +201,8 @@ nonisolated struct SummaryRunner {
             "--tools", "Read,Write,Edit,Grep,Glob",
             "--permission-mode", "dontAsk",
             "--allowedTools", "Read,Write,Edit,Grep,Glob",
+            "--model", Self.claudeModel,
+            "--effort", Self.claudeEffort,
             "--max-turns", "15",
             "--no-session-persistence",
             "--output-format", "json",
@@ -258,6 +289,8 @@ nonisolated struct SummaryRunner {
             // string is unambiguous in every version (the bare-word fallback is only a
             // fallback). Everything the summary needs is on disk.
             "-c", "web_search=\"disabled\"",
+            "-m", Self.codexModel,
+            "-c", "model_reasoning_effort=\"\(Self.codexEffort)\"",
             "--output-last-message", lastMessage.path,
             prompt,
         ]

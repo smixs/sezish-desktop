@@ -18,6 +18,9 @@ public enum SummaryVault {
     public static let peopleDir = "people"
     public static let projectsDir = "projects"
     public static let decisionsDir = "decisions"
+    /// Transcript copies the app itself places in the vault, next to (not inside) the
+    /// agent's card tree: `<notesFolder>/transcripts/YYYY/MM/<base>-transcript.md`.
+    public static let transcriptsDir = "transcripts"
     /// Hub note linking every card — the entry point of the vault graph.
     public static let hubFile = "_index.md"
 }
@@ -31,6 +34,11 @@ public enum SummaryPromptBuilder {
         meetingMdPath: String,
         notesFolderPath: String
     ) -> String {
+        // The meeting card name and the transcript link are derived from the meeting
+        // file's basename, so the app can later check for the card at a known path.
+        let base = URL(fileURLWithPath: meetingMdPath).deletingPathExtension().lastPathComponent
+        let cardPath = "\(SummaryVault.subdirectory)/\(SummaryVault.meetingsDir)/\(base).md"
+
         let languageName = switch outputLanguage {
         case .ru: "Russian"
         case .uz: "Uzbek"
@@ -49,6 +57,9 @@ public enum SummaryPromptBuilder {
         lines may be tagged "Я:" / "Они:" (ru) or "Men:" / "Ular:" (uz): the mic side
         ("Я" / "Men") is the vault owner, the system side ("Они" / "Ular") is the other
         party on the call.
+        The file may be large. Read it in chunks with the Read tool (offset and limit
+        parameters), one chunk after another, until you have reached the end of the
+        file. Do not summarize from a partial read.
 
         CARD FORMAT
         Every card is one markdown file with YAML frontmatter:
@@ -91,11 +102,12 @@ public enum SummaryPromptBuilder {
                        line to `## Log`.
            SUPERSEDE — a new fact contradicts a stored one; rewrite the field and move the
                        old value into an append-only `## History` section with a date range.
-        3. Create exactly one meeting card in sezish/meetings/. Derive its filename
-           from the meeting file's basename. It holds: the date, the participants (linked),
+        3. Create exactly one meeting card in sezish/meetings/. Its path is
+           exactly \(cardPath), no other name. It holds: the date, the participants (linked),
            and a faithful summary — key points, decisions with owners, action items with
            owners and deadlines, open questions — plus `## Related` links to every entity
-           card you touched.
+           card you touched. The `## Related` of this meeting card also contains the line
+           `- [[\(base)-transcript]]`, the link to the full transcript copy in the vault.
         4. Entities: fewer but richer. Only significant people, projects and decisions.
            Skip logistics, small talk and transient status.
         5. Linking. Every new card's `## Related` links the hub
@@ -141,6 +153,15 @@ public enum SummaryMarker {
         "\(prefix) \(ISO8601DateFormatter().string(from: date)) -->"
     }
 
+    /// The text without any marker line. Inverse of `append` for text the app stamped:
+    /// stripping what `append` added gives back the original bytes.
+    public static func stripped(from mdText: String) -> String {
+        mdText
+            .components(separatedBy: "\n")
+            .filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix(prefix) }
+            .joined(separator: "\n")
+    }
+
     /// Appends the marker as a new last line. Deliberately dumb: it never reads or
     /// rewrites what is already there, so stamping can only ever add bytes to the
     /// user's transcript. Guard it with `isPresent` — twice appended is twice written.
@@ -149,5 +170,21 @@ public enum SummaryMarker {
         defer { try? handle.close() }
         try handle.seekToEnd()
         try handle.write(contentsOf: Data("\n\(line(date: date))".utf8))
+    }
+}
+
+/// Where the app's own copy of a meeting transcript lives inside the notes folder.
+public enum SummaryTranscriptCopy {
+    /// `transcripts/YYYY/MM/<baseName>-transcript.md`, relative to the notes folder.
+    /// Year and month come from the date in a name we wrote (`call-YYYY-MM-DD-...`);
+    /// any other name uses `fallbackDate` (the file's modification date).
+    public static func relativePath(
+        baseName: String, fallbackDate: Date, calendar: Calendar = .current
+    ) -> String {
+        let date = MeetingFileNamer.date(fromBaseName: baseName, calendar: calendar) ?? fallbackDate
+        let c = calendar.dateComponents([.year, .month], from: date)
+        return String(
+            format: "%@/%04d/%02d/%@-transcript.md",
+            SummaryVault.transcriptsDir, c.year ?? 0, c.month ?? 0, baseName)
     }
 }
