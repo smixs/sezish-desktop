@@ -137,9 +137,8 @@ struct Strings {
     let notifMeetingRecovered: String
     /// Fired when the summary CLI finished and the vault cards are on disk.
     let notifSummaryReady: String
-    /// Fired when it did not. The log is named because there is no UI for the
-    /// details — the file is where they live.
-    let notifSummaryFailed: String
+    let notifSummaryCardsFailed: String
+    let notifSummaryRetryAction: String
     let meetingDocTitle: String
     /// `%@` is the call app's display name ("Звонок в Telegram").
     let meetingDocTitleApp: String
@@ -341,7 +340,8 @@ extension Strings {
         notifLocalLongMeeting: "Длинная запись в локальном режиме: распознавание займёт несколько минут и много памяти.",
         notifMeetingRecovered: "Запись встречи восстановлена после сбоя",
         notifSummaryReady: "Саммари встречи готово",
-        notifSummaryFailed: "Саммари не получилось — детали в summary.log",
+        notifSummaryCardsFailed: "Карточки встречи не собрались",
+        notifSummaryRetryAction: "Повторить",
         meetingDocTitle: "Запись звонка",
         meetingDocTitleApp: "Звонок в %@",
         meetingDocDuration: "Длительность",
@@ -491,7 +491,8 @@ extension Strings {
         notifLocalLongMeeting: "Lokal rejimda uzun yozuv: aniqlash bir necha daqiqa va koʼp xotira oladi.",
         notifMeetingRecovered: "Uchrashuv yozuvi tiklandi",
         notifSummaryReady: "Uchrashuv xulosasi tayyor",
-        notifSummaryFailed: "Xulosa chiqmadi — batafsil summary.log faylida",
+        notifSummaryCardsFailed: "Uchrashuv kartochkalari yigʼilmadi",
+        notifSummaryRetryAction: "Qayta urinish",
         meetingDocTitle: "Qoʼngʼiroq yozuvi",
         meetingDocTitleApp: "%@ qoʼngʼirogʼi",
         meetingDocDuration: "Davomiyligi",

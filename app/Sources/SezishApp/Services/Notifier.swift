@@ -33,6 +33,10 @@ final class Notifier {
         UNUserNotificationCenter.current().add(request)
     }
 
+    static let retryActionID = "sezish.summary.retry"
+    static func retryUserInfo(for md: URL) -> [AnyHashable: Any] { [:] }
+    static func retryTarget(actionIdentifier: String, userInfo: [AnyHashable: Any]) -> URL? { nil }
+
     private var hasBundle: Bool { Bundle.main.bundleIdentifier != nil }
 
     private func requestAuthorizationOnce() {

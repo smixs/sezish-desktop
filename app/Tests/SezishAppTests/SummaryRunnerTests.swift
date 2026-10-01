@@ -98,7 +98,7 @@ import Testing
         return """
             \(dumpArgv)
                 printf '%s' "${ANTHROPIC_API_KEY:-UNSET}" > '\(envSink.path)'
-                printf 'card' > "$PWD/sezish/meetings/card.md"
+                printf 'card' > "$PWD/sezish/meetings/2026-07-30 11-00 call.md"
                 cat <<'ENVELOPE'
             \(envelope)
             ENVELOPE
@@ -176,7 +176,7 @@ import Testing
         #expect(outcome == .done)
         #expect(Self.invocationCount(counter) == 1)
         // The agent worked in the vault, not wherever the app happened to be.
-        #expect(Self.read(notes.appendingPathComponent("sezish/meetings/card.md")) == "card")
+        #expect(Self.read(notes.appendingPathComponent("sezish/meetings/2026-07-30 11-00 call.md")) == "card")
         #expect(SummaryMarker.isPresent(in: Self.read(md)))
         #expect(Self.read(log).contains("summary claude:"))
 
@@ -397,7 +397,7 @@ import Testing
         // rendered segment. A line-counting heuristic called this "no transcript" and
         // silently dropped the meeting — found in the field, and the reason the check
         // now looks for the "[m:ss]" label instead.
-        let md = root.appendingPathComponent("short.md")
+        let md = root.appendingPathComponent("2026-07-30 11-00 call.md")
         try """
             # Запись звонка - 30 июля 2026 г. в 15:42
 
@@ -515,7 +515,7 @@ import Testing
                   if [ "$1" = "--cd" ]; then cd_dir="$2"; fi
                   shift
                 done
-                printf 'card' > "$cd_dir/sezish/meetings/card.md"
+                printf 'card' > "$cd_dir/sezish/meetings/2026-07-30 11-00 call.md"
                 printf 'Saved 1 meeting card.' > "$last"
                 ;;
             esac
@@ -534,7 +534,7 @@ import Testing
             meetingMd: md, notesFolder: notes, engine: .codex, language: .uz)
 
         #expect(outcome == .done)
-        #expect(Self.read(notes.appendingPathComponent("sezish/meetings/card.md")) == "card")
+        #expect(Self.read(notes.appendingPathComponent("sezish/meetings/2026-07-30 11-00 call.md")) == "card")
         #expect(SummaryMarker.isPresent(in: Self.read(md)))
         #expect(Self.read(log).contains("summary codex:"))
     }
@@ -613,7 +613,7 @@ import Testing
             #expect(fm.fileExists(atPath: path, isDirectory: &isDirectory))
             #expect(isDirectory.boolValue)
         }
-        #expect(Self.read(notes.appendingPathComponent("sezish/meetings/card.md")) == "card")
+        #expect(Self.read(notes.appendingPathComponent("sezish/meetings/2026-07-30 11-00 call.md")) == "card")
     }
 
     // MARK: - 9. Models, transcript copy
@@ -621,7 +621,8 @@ import Testing
     /// A claude fixture that records argv and whether the transcript copy already
     /// existed when the agent started.
     private static func orderProbeScript(
-        counter: URL, argvSink: URL, copyProbe: URL, copyPath: URL
+        counter: URL, argvSink: URL, copyProbe: URL, copyPath: URL,
+        cardName: String = "2026-07-30 11-00 call.md"
     ) -> String {
         claudeScript(
             counter: counter,
@@ -629,7 +630,7 @@ import Testing
                 : > '\(argvSink.path)'
                 for a in "$@"; do printf '%s\\037' "$a" >> '\(argvSink.path)'; done
                 if [ -f '\(copyPath.path)' ]; then echo yes > '\(copyProbe.path)'; else echo no > '\(copyProbe.path)'; fi
-                printf 'card' > "$PWD/sezish/meetings/card.md"
+                printf 'card' > "$PWD/sezish/meetings/\(cardName)"
                 echo '{"type":"result","is_error":false}'
                 """)
     }
@@ -721,7 +722,8 @@ import Testing
         let script = root.appendingPathComponent("bin/claude")
         try Self.writeScript(
             Self.orderProbeScript(
-                counter: counter, argvSink: argvSink, copyProbe: probe, copyPath: copy),
+                counter: counter, argvSink: argvSink, copyProbe: probe, copyPath: copy,
+                cardName: "call-2026-09-04-12-01.md"),
             to: script)
         let md = root.appendingPathComponent("call-2026-09-04-12-01.md")
         let body = try String(contentsOf: Self.writeMeetingMd(in: root), encoding: .utf8)
@@ -830,5 +832,201 @@ import Testing
 
         #expect(!FileManager.default.fileExists(
             atPath: notes.appendingPathComponent("transcripts").path))
+    }
+
+    // MARK: - 10. Card check, attempts, limits
+
+    /// Fixed "attempt start" for the freshness check. Far in the past, so a card the
+    /// fixture writes during the test (real mtime) is always newer, and a card
+    /// back-dated to `staleDate` is always older. No real clock decides anything.
+    private static let attemptStart = Date(timeIntervalSince1970: 1_000_000_000)
+    private static let staleDate = Date(timeIntervalSince1970: 900_000_000)
+    private static let cardName = "2026-07-30 11-00 call.md"
+
+    private struct Rig {
+        let root: URL
+        let notes: URL
+        let md: URL
+        let counter: URL
+        let log: URL
+        let script: URL
+    }
+
+    /// Claude fixture whose `-p` branch is `onPrompt` and whose `n` (1-based call
+    /// number) is available as `$n`.
+    private static func makeClaudeRig(_ onPrompt: String) throws -> Rig {
+        let root = try makeTempDir()
+        let counter = root.appendingPathComponent("invocations.txt")
+        let script = root.appendingPathComponent("bin/claude")
+        try writeScript(
+            claudeScript(
+                counter: counter,
+                onPrompt: "    n=$(wc -l < '\(counter.path)' | tr -d ' ')\n\(onPrompt)"),
+            to: script)
+        let notes = root.appendingPathComponent("notes", isDirectory: true)
+        try FileManager.default.createDirectory(at: notes, withIntermediateDirectories: true)
+        return Rig(
+            root: root, notes: notes, md: try writeMeetingMd(in: root), counter: counter,
+            log: root.appendingPathComponent("logs/summary.log"), script: script)
+    }
+
+    private static func run(_ rig: Rig, engine: SummaryEngineKind = .claude) async -> SummaryOutcome {
+        let locator =
+            engine == .claude
+            ? EngineLocator(claudeCandidates: [rig.script])
+            : EngineLocator(codexCandidates: [rig.script])
+        let runner = SummaryRunner(locator: locator, now: { attemptStart }, logURL: rig.log)
+        return await runner.summarize(
+            meetingMd: rig.md, notesFolder: rig.notes, engine: engine, language: .ru)
+    }
+
+    private static let okEnvelope = #"echo '{"type":"result","is_error":false}'"#
+
+    @Test func exitZeroWithoutACardIsAFailureRetriedThreeTimes() async throws {
+        let rig = try Self.makeClaudeRig(Self.okEnvelope)
+        defer { try? FileManager.default.removeItem(at: rig.root) }
+
+        let outcome = await Self.run(rig)
+
+        #expect(outcome == .failed("no meeting card written"))
+        #expect(Self.invocationCount(rig.counter) == 3)
+        #expect(!SummaryMarker.isPresent(in: Self.read(rig.md)))
+        let log = Self.read(rig.log)
+        for attempt in 1...3 { #expect(log.contains("attempt \(attempt)/3")) }
+    }
+
+    @Test func aCardOlderThanTheAttemptDoesNotCount() async throws {
+        let rig = try Self.makeClaudeRig(Self.okEnvelope)
+        defer { try? FileManager.default.removeItem(at: rig.root) }
+        let card = rig.notes.appendingPathComponent("sezish/meetings/\(Self.cardName)")
+        try FileManager.default.createDirectory(
+            at: card.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try "old".write(to: card, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes(
+            [.modificationDate: Self.staleDate], ofItemAtPath: card.path)
+
+        let outcome = await Self.run(rig)
+
+        #expect(outcome == .failed("no meeting card written"))
+        #expect(!SummaryMarker.isPresent(in: Self.read(rig.md)))
+    }
+
+    @Test func aCardWithAnotherNameDoesNotCount() async throws {
+        let rig = try Self.makeClaudeRig(
+            "    printf 'card' > \"$PWD/sezish/meetings/other.md\"\n\(Self.okEnvelope)")
+        defer { try? FileManager.default.removeItem(at: rig.root) }
+
+        #expect(await Self.run(rig) == .failed("no meeting card written"))
+    }
+
+    @Test func succeedsOnTheThirdAttemptAndStampsOnce() async throws {
+        let rig = try Self.makeClaudeRig(
+            """
+                if [ "$n" -lt 3 ]; then echo 'overloaded' >&2; exit 1; fi
+                printf 'card' > "$PWD/sezish/meetings/\(Self.cardName)"
+            \(Self.okEnvelope)
+            """)
+        defer { try? FileManager.default.removeItem(at: rig.root) }
+
+        let outcome = await Self.run(rig)
+
+        #expect(outcome == .done)
+        #expect(Self.invocationCount(rig.counter) == 3)
+        #expect(SummaryMarker.isPresent(in: Self.read(rig.md)))
+        #expect(Self.read(rig.log).contains("attempt 3/3"))
+    }
+
+    @Test func stopsAfterTheFirstGoodAttempt() async throws {
+        let rig = try Self.makeClaudeRig(
+            """
+                printf 'card' > "$PWD/sezish/meetings/\(Self.cardName)"
+            \(Self.okEnvelope)
+            """)
+        defer { try? FileManager.default.removeItem(at: rig.root) }
+
+        #expect(await Self.run(rig) == .done)
+        #expect(Self.invocationCount(rig.counter) == 1)
+    }
+
+    @Test func codexWithoutACardIsAlsoRetriedAndFails() async throws {
+        let root = try Self.makeTempDir()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let counter = root.appendingPathComponent("invocations.txt")
+        let script = root.appendingPathComponent("bin/codex")
+        try Self.writeScript(
+            """
+            case "$1" in
+              --version) echo 'codex-cli 0.146.0' ;;
+              login) exit 0 ;;
+              exec)
+                echo x >> '\(counter.path)'
+                last=""
+                while [ $# -gt 0 ]; do
+                  if [ "$1" = "--output-last-message" ]; then last="$2"; fi
+                  shift
+                done
+                printf 'All done.' > "$last"
+                ;;
+            esac
+            """, to: script)
+        let notes = root.appendingPathComponent("notes", isDirectory: true)
+        try FileManager.default.createDirectory(at: notes, withIntermediateDirectories: true)
+        let rig = Rig(
+            root: root, notes: notes, md: try Self.writeMeetingMd(in: root), counter: counter,
+            log: root.appendingPathComponent("logs/summary.log"), script: script)
+
+        #expect(await Self.run(rig, engine: .codex) == .failed("no meeting card written"))
+        #expect(Self.invocationCount(counter) == 3)
+        #expect(!SummaryMarker.isPresent(in: Self.read(rig.md)))
+    }
+
+    @Test func aLoggedOutEngineIsNotRetried() async throws {
+        let root = try Self.makeTempDir()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let counter = root.appendingPathComponent("invocations.txt")
+        let script = root.appendingPathComponent("bin/claude")
+        try Self.writeScript(
+            Self.claudeScript(counter: counter, loggedIn: false, onPrompt: "    exit 1"),
+            to: script)
+        let notes = root.appendingPathComponent("notes", isDirectory: true)
+        try FileManager.default.createDirectory(at: notes, withIntermediateDirectories: true)
+        let rig = Rig(
+            root: root, notes: notes, md: try Self.writeMeetingMd(in: root), counter: counter,
+            log: root.appendingPathComponent("logs/summary.log"), script: script)
+
+        #expect(await Self.run(rig) == .skipped)
+        #expect(Self.invocationCount(counter) == 0)
+    }
+
+    @Test func limitsAreGenerousAndGrowWithTheTranscript() {
+        #expect(SummaryRunner.maxAttempts == 3)
+        #expect(SummaryRunner.maxTurns >= 40)
+        let small = SummaryRunner.timeout(forTranscriptBytes: 0)
+        let medium = SummaryRunner.timeout(forTranscriptBytes: 100_000)
+        let huge = SummaryRunner.timeout(forTranscriptBytes: 500_000_000)
+        #expect(small >= 600)
+        #expect(medium > small)
+        #expect(huge == 1800)
+        #expect(medium <= huge)
+    }
+
+    @Test func claudeIsGivenTheRaisedTurnLimit() async throws {
+        let argvSink = FileManager.default.temporaryDirectory
+            .appendingPathComponent("argv-\(UUID().uuidString).txt")
+        defer { try? FileManager.default.removeItem(at: argvSink) }
+        let rig = try Self.makeClaudeRig(
+            """
+                : > '\(argvSink.path)'
+                for a in "$@"; do printf '%s\\037' "$a" >> '\(argvSink.path)'; done
+                printf 'card' > "$PWD/sezish/meetings/\(Self.cardName)"
+            \(Self.okEnvelope)
+            """)
+        defer { try? FileManager.default.removeItem(at: rig.root) }
+
+        _ = await Self.run(rig)
+
+        let argv = Self.capturedArgv(argvSink)
+        let turns = try #require(argv.firstIndex(of: "--max-turns"))
+        #expect((Int(argv[turns + 1]) ?? 0) >= 40)
     }
 }

@@ -695,10 +695,12 @@ extension AppState {
     ) -> String? {
         switch outcome {
         case .done: strings.notifSummaryReady
-        case .failed: strings.notifSummaryFailed
+        case .failed: strings.notifSummaryCardsFailed
         case .skipped: nil
         }
     }
+
+    nonisolated static func summaryOffersRetry(_ outcome: SummaryOutcome) -> Bool { false }
 
     /// The setting round-trips through `URL(string:)`, so it comes back either as a
     /// `file:` URL or — when someone set it with `defaults write` — as a bare path with

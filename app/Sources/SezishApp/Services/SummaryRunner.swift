@@ -30,7 +30,8 @@ nonisolated enum SummaryOutcome: Equatable, Sendable {
 nonisolated struct SummaryRunner {
     private let locator: EngineLocator
     private let codexHome: URL
-    private let timeout: TimeInterval
+    private let fixedTimeout: TimeInterval?
+    private let now: @Sendable () -> Date
     private let logURL: URL
 
     /// - Parameters:
@@ -44,12 +45,14 @@ nonisolated struct SummaryRunner {
     init(
         locator: EngineLocator = EngineLocator(),
         codexHome: URL? = nil,
-        timeout: TimeInterval = 600,
+        timeout: TimeInterval? = nil,
+        now: @escaping @Sendable () -> Date = { Date() },
         logURL: URL? = nil
     ) {
         self.locator = locator
         self.codexHome = codexHome ?? EngineLocator.defaultCodexHome
-        self.timeout = timeout
+        self.fixedTimeout = timeout
+        self.now = now
         self.logURL = logURL ?? Self.defaultLogURL
     }
 
@@ -58,6 +61,12 @@ nonisolated struct SummaryRunner {
     static let claudeEffort = "high"
     static let codexModel = "gpt-6-luna"
     static let codexEffort = "max"
+
+    static let maxTurns = 15
+    static let maxAttempts = 1
+
+    static func timeout(forTranscriptBytes bytes: Int) -> TimeInterval { 600 }
+    private var timeout: TimeInterval { fixedTimeout ?? 600 }
 
     private static var defaultLogURL: URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)
