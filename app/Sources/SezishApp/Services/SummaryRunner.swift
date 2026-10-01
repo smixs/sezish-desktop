@@ -136,7 +136,7 @@ nonisolated struct SummaryRunner {
             .appendingPathComponent("\(SummaryVault.subdirectory)/\(SummaryVault.meetingsDir)")
             .appendingPathComponent(base + ".md")
 
-                for attempt in 1...Self.maxAttempts {
+        for attempt in 1...Self.maxAttempts {
             let started = now()
             log(
                 "attempt \(attempt)/\(Self.maxAttempts) \(name) via \(binary.path) (timeout \(Int(attemptTimeout))s)",
