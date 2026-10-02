@@ -9,6 +9,7 @@ import os
 /// only thing left to hold is the whole Mac. Same subsystem as every other log.
 private let systemTapLog = Logger(subsystem: "com.smixs.sezish", category: "system-tap")
 private let meetingStopLog = Logger(subsystem: "com.smixs.sezish", category: "meeting-stop")
+private let meetingStartLog = Logger(subsystem: "com.smixs.sezish", category: "meeting-start")
 
 /// Meeting recording lifecycle for `AppState`. Split out like AppState+Model to
 /// keep the state file on UI/hotkey wiring.
@@ -50,6 +51,12 @@ extension AppState {
 
     func startMeetingRecording(source: MeetingStartSource) {
         guard status == .idle else { return }
+        switch source {
+        case .auto(let bundleID):
+            meetingStartLog.notice("meeting start: auto (\(bundleID ?? "unknown", privacy: .public))")
+        case .manual:
+            meetingStartLog.notice("meeting start: manual")
+        }
         // Once, before a single sample is recorded: from here on the system stem
         // holds the call app's audio and not whatever else is playing. The mic
         // device (A4) and the file name (A7) read the same field later.
