@@ -76,6 +76,13 @@ struct MeetingDetectionPolicyTests {
         #expect(policy.classify("com.cockos.reaper") == .deny)
     }
 
+    @Test func rogueAmoebaAudioRoutersAreDenied() {
+        #expect(policy.classify("com.rogueamoeba.arkaudiod") == .deny)
+        #expect(policy.classify("com.rogueamoeba.soundsource") == .deny)
+        #expect(policy.classify("com.rogueamoeba.audiohijack") == .deny)
+        #expect(policy.classify("COM.ROGUEAMOEBA.ARKAUDIOD") == .deny)
+    }
+
     @Test func extraDenySilencesAnything() {
         let p = MeetingDetectionPolicy(
             ownBundleID: "com.smixs.sezish", extraDenyPrefixes: ["com.slack.Slack"])
