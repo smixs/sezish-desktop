@@ -3,10 +3,11 @@ import Foundation
 /// Decides whether a full-duplex audio process (mic in + audio out, see
 /// `MeetingDetector`) counts as a call: every process does, except sezish
 /// itself and a short deny list of dictation engines, voice-mode assistants,
-/// screen recorders, IDEs and DAWs — the apps that are full-duplex without
-/// being on a call. No call-app allowlist, no browser tab probing — a browser
-/// helper on a call is a call, whichever browser it belongs to (Dia ships Arc's
-/// helper bundle ids, which is what broke the old per-browser scheme).
+/// screen recorders, IDEs, DAWs and audio routers — the apps that are
+/// full-duplex without being on a call. No call-app allowlist, no browser tab
+/// probing — a browser helper on a call is a call, whichever browser it
+/// belongs to (Dia ships Arc's helper bundle ids, which is what broke the old
+/// per-browser scheme).
 /// Matching is case-insensitive prefix matching, since helper ids change case
 /// against their main app.
 public struct MeetingDetectionPolicy: Sendable {
@@ -70,7 +71,8 @@ public struct MeetingDetectionPolicy: Sendable {
 
     /// Never a call: dictation/STT engines (the false-positive class every
     /// previous design tripped on), voice-capable AI assistants, screen
-    /// recorders, IDEs, and DAWs (full-duplex whenever their engine runs).
+    /// recorders, IDEs, DAWs (full-duplex whenever their engine runs), and audio
+    /// routers (their engine is full-duplex while it captures any app's audio).
     /// Some ids are best-effort — a wrong one costs one unwanted recording,
     /// which the short-recording rule then leaves untranscribed.
     private static let builtinDenyPrefixes: [String] = [
@@ -109,5 +111,8 @@ public struct MeetingDetectionPolicy: Sendable {
         "com.steinberg.cubase",
         "com.bitwig.BitwigStudio",
         "com.presonus.studioone",
+        // Audio routers (SoundSource, Audio Hijack, shared arkaudiod engine):
+        // full-duplex whenever they capture any app's audio, never a call
+        "com.rogueamoeba",
     ]
 }
