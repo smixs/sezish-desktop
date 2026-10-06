@@ -147,6 +147,105 @@ struct MeetingTranscriptionRuleTests {
     }
 }
 
+/// The capture side of the silence rule (owner decision D2, 06.10.2026): a take whose
+/// capture had to be abandoned, or whose track stopped receiving data, is kept whatever
+/// the silence rule says. Silence there was never silence: it was a dead capture.
+struct MeetingCaptureIntegrityTests {
+    private let rate = Double(MeetingCaptureIntegrity.sampleRate)
+
+    /// A healthy take: the mic delivered for the whole clock time.
+    private func healthy(seconds: Double, system: Double? = nil) -> MeetingCaptureIntegrity {
+        MeetingCaptureIntegrity(
+            micFrames: Int(seconds * rate),
+            systemFrames: system.map { Int($0 * rate) },
+            micAbandoned: false, systemAbandoned: false, systemLost: false)
+    }
+
+    /// The incident: 647 s by the clock, 3 s of mic before the engine died, 6.7 s of
+    /// system audio. The silence rule alone would have deleted it (647 - 600 < 60).
+    @Test func theIncidentTakeIsKept() {
+        let integrity = MeetingCaptureIntegrity(
+            micFrames: Int(3 * rate), systemFrames: Int(6.7 * rate),
+            micAbandoned: false, systemAbandoned: false, systemLost: false)
+        #expect(integrity.isBroken(duration: 647))
+        #expect(MeetingTranscriptionRule.discardsAudio(duration: 647, stopReason: .silence(600)))
+        #expect(!MeetingTranscriptionRule.discardsAudio(
+            duration: 647, stopReason: .silence(600), integrity: integrity))
+    }
+
+    /// Not only exactly zero: a mic that delivered a few buffers and then went dead is
+    /// as broken as one that never started.
+    @Test func aMicFarShortOfTheClockIsBroken() {
+        let fewBuffers = MeetingCaptureIntegrity(
+            micFrames: 40_000, systemFrames: nil,
+            micAbandoned: false, systemAbandoned: false, systemLost: false)
+        #expect(fewBuffers.isBroken(duration: 630))
+        let none = MeetingCaptureIntegrity(
+            micFrames: 0, systemFrames: nil,
+            micAbandoned: false, systemAbandoned: false, systemLost: false)
+        #expect(none.isBroken(duration: 630))
+    }
+
+    /// A healthy take keeps today's rule exactly: the silence net still throws away a
+    /// silence-stopped recording with no meeting in it.
+    @Test func aHealthyTakeKeepsTheSilenceRule() {
+        let integrity = healthy(seconds: 630, system: 630)
+        #expect(!integrity.isBroken(duration: 630))
+        #expect(MeetingTranscriptionRule.discardsAudio(
+            duration: 630, stopReason: .silence(600), integrity: integrity))
+        #expect(!MeetingTranscriptionRule.discardsAudio(
+            duration: 660, stopReason: .silence(600), integrity: healthy(seconds: 660)))
+    }
+
+    /// The mic misses a buffer at the start and the tail at the stop: a little short
+    /// of the clock is a healthy mic, not a dead one.
+    @Test func aMicSlightlyShortOfTheClockIsHealthy() {
+        #expect(!healthy(seconds: 625, system: 625).isBroken(duration: 630))
+    }
+
+    /// The system track is judged by its capture's own word (abandoned, or a rebuild
+    /// CoreAudio refused), not by its frame count: whether a process tap delivers
+    /// buffers while the call app plays nothing is not verified yet, and a silent call
+    /// counted as a dead track would keep every take the silence net exists to drop.
+    @Test func aSystemTrackShortOfTheClockAloneIsNotBroken() {
+        #expect(!healthy(seconds: 630, system: 6.7).isBroken(duration: 630))
+    }
+
+    /// An abandoned capture on either track, or a system track a device change left
+    /// without an aggregate, is broken whatever the frame counts say.
+    @Test func abandonedOrLostCapturesAreBroken() {
+        let full = Int(630 * rate)
+        let cases = [
+            MeetingCaptureIntegrity(
+                micFrames: full, systemFrames: full,
+                micAbandoned: true, systemAbandoned: false, systemLost: false),
+            MeetingCaptureIntegrity(
+                micFrames: full, systemFrames: full,
+                micAbandoned: false, systemAbandoned: true, systemLost: false),
+            MeetingCaptureIntegrity(
+                micFrames: full, systemFrames: full,
+                micAbandoned: false, systemAbandoned: false, systemLost: true),
+        ]
+        for integrity in cases {
+            #expect(integrity.isBroken(duration: 630))
+            #expect(integrity.abandoned == (integrity.micAbandoned || integrity.systemAbandoned))
+            #expect(!MeetingTranscriptionRule.discardsAudio(
+                duration: 630, stopReason: .silence(600), integrity: integrity))
+        }
+    }
+
+    /// Stops the silence rule never applied to stay untouched by the capture check.
+    @Test func otherStopsKeepTheirAudioEitherWay() {
+        let broken = MeetingCaptureIntegrity(
+            micFrames: 0, systemFrames: nil,
+            micAbandoned: false, systemAbandoned: false, systemLost: false)
+        #expect(!MeetingTranscriptionRule.discardsAudio(
+            duration: 30, stopReason: .manual, integrity: broken))
+        #expect(!MeetingTranscriptionRule.discardsAudio(
+            duration: 30, stopReason: .manual, integrity: healthy(seconds: 30)))
+    }
+}
+
 struct MeetingStopBannerTests {
     /// The silence banner speaks the unit the hidden setting uses, and names the
     /// only stop the detector has to re-arm after.

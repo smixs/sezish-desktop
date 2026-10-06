@@ -259,6 +259,36 @@ private final class OddCallFailingTranscriber: Transcriber, @unchecked Sendable 
         #expect(!md.contains("\(Strings.ru.meetingSpeakerMe):"))
     }
 
+    /// The incident's spool folder: the mic engine died before its first buffer, so
+    /// mic.wav is a bare 44-byte header, while the system stem holds a few seconds.
+    /// The take is recovered from the system track alone, timed by its frames.
+    @Test func salvagesAnOrphanWhoseMicIsABareHeader() async throws {
+        let dir = try makeMeetingsDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let orphan = try makeOrphan(
+            in: dir, mic: [], system: tone(frames: 7 * 16_000, amplitude: 0.6))
+
+        let outcome = await MeetingSalvage.salvage(
+            orphan: orphan,
+            meetingsDir: dir,
+            transcriber: LoudnessTranscriber(),
+            strings: .ru,
+            language: .ru
+        )
+
+        guard case .recovered(let mdURL) = outcome else {
+            Issue.record("expected .recovered, got \(outcome)")
+            return
+        }
+        #expect(audioExists(in: dir, base: mdURL.deletingPathExtension().lastPathComponent))
+        let md = try String(contentsOf: mdURL, encoding: .utf8)
+        #expect(md.contains("их текст"))
+        #expect(!md.contains("мой текст"))
+        #expect(!md.contains("\(Strings.ru.meetingSpeakerThem):"))
+        #expect(md.contains("\(Strings.ru.meetingDocDuration): 0:07"))
+        #expect(!FileManager.default.fileExists(atPath: orphan.path))
+    }
+
     // MARK: - Stems kept for a retry
 
     @Test func discoverStemsFindsOnlyStemsDirectories() throws {
