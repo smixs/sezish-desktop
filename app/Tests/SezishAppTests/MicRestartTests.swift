@@ -147,14 +147,10 @@ import Testing
         DispatchQueue.global().async { scheduler.fireAll() }
         pin.waitUntilParked()
 
-        let stopped = DispatchSemaphore(value: 0)
-        DispatchQueue.global().async {
-            mic.stopSynchronously()
-            stopped.signal()
-        }
+        let stop = Task.detached { mic.stopSynchronously() }
         while !mic.isStopping { await Task.yield() }
         pin.release()
-        stopped.wait()
+        await stop.value
 
         #expect(backend.engines.count == 2)
         let second = backend.engines[1]

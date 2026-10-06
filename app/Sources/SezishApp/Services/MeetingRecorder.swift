@@ -44,10 +44,12 @@ final class MeetingRecorder {
 
     /// The real mic: a fresh `AVAudioEngine`, pinned to `deviceID` before the format is
     /// read and the tap installed. nil is the engine's own default: dictation's way.
+    /// Restarted on the same device when a device change stops it (owner decision D1);
+    /// dictation's mic is not.
     nonisolated static func engineMic(
         deviceID: AudioDeviceID?, onSamples16k: @escaping @Sendable ([Float]) -> Void
     ) -> MeetingMicCapture {
-        MicRecorder(deviceID: deviceID, onSamples16k: onSamples16k)
+        MicRecorder(deviceID: deviceID, onSamples16k: onSamples16k, restartsOnConfigurationChange: true)
     }
 
     /// The real system audio: a process tap on CoreAudio.
