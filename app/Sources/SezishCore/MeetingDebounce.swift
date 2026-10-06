@@ -95,10 +95,20 @@ public enum MeetingTranscriptionRule {
     /// recording ends with the silence window that stopped it, so without the
     /// discount the "short recording" rule could never fire for exactly the
     /// recordings it exists for.
+    ///
+    /// A broken capture (owner decision D2) gets no silence discount: the window
+    /// the silence net waited out was a dead track, not a quiet call, so the take
+    /// is judged by its clock time and goes the whole way (.md, transcript,
+    /// banner). The detector's window stays discounted: that is the call app
+    /// letting go of the mic, whatever the capture did.
     public static func shouldTranscribe(
-        duration: TimeInterval, stopReason: MeetingStopReason
+        duration: TimeInterval, stopReason: MeetingStopReason,
+        integrity: MeetingCaptureIntegrity? = nil
     ) -> Bool {
-        duration - stopReason.trailingSilence >= minimumSeconds
+        let brokenSilence = stopReason.isSilenceStop
+            && integrity?.isBroken(duration: duration) == true
+        let discount = brokenSilence ? 0 : stopReason.trailingSilence
+        return duration - discount >= minimumSeconds
     }
 
     /// True when the take leaves nothing at all behind: no audio, no transcript,
@@ -125,10 +135,12 @@ public enum MeetingTranscriptionRule {
 public struct MeetingCaptureIntegrity: Sendable, Equatable {
     /// The stems' rate: every frame is 1/16000 s of the take.
     public static let sampleRate = 16_000
-    /// A mic delivering less than this share of the clock time stopped receiving
-    /// data somewhere: `AVAudioEngine` hands over buffers in silence too, so a live
-    /// mic falls short only by a buffer at the start and the tail at the stop.
-    public static let starvedShare = 0.5
+    /// A track delivering less than this share of the clock time stopped receiving
+    /// data somewhere. Both captures hand over buffers in silence too
+    /// (`AVAudioEngine`'s input tap, and the tap's aggregate, clocked by the output
+    /// device), so a live track falls short only by a buffer at the start, the tail
+    /// at the stop and a second or so per device change.
+    public static let starvedShare = 0.9
 
     public var micFrames: Int
     /// nil: the recording had no system stem (the tap failed at the start).
@@ -152,12 +164,13 @@ public struct MeetingCaptureIntegrity: Sendable, Equatable {
     /// A stop on either track never came back within its timeout.
     public var abandoned: Bool { micAbandoned || systemAbandoned }
 
-    /// The system track is judged by its capture's own word, not by its frames:
-    /// whether a process tap delivers buffers while the call app plays nothing is
-    /// not verified, and a quiet call must not read as a dead track.
+    /// Every track there is gets its frames counted against the clock (D2), the
+    /// system one only when the recording had a system stem.
     public func isBroken(duration: TimeInterval) -> Bool {
         if abandoned || systemLost { return true }
-        let expected = duration * Double(Self.sampleRate)
-        return Double(micFrames) < expected * Self.starvedShare
+        let enough = duration * Double(Self.sampleRate) * Self.starvedShare
+        if Double(micFrames) < enough { return true }
+        if let systemFrames, Double(systemFrames) < enough { return true }
+        return false
     }
 }

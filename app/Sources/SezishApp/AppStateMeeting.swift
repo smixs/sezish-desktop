@@ -577,10 +577,13 @@ extension AppState {
         // Too short to be a meeting (voice search, a voice message): the audio
         // stays, everything downstream — transcript, .md, hook, summary,
         // notification — is skipped, silently. The window an automatic stop waited
-        // out is not meeting time, so it comes off the duration first.
+        // out is not meeting time, so it comes off the duration first, unless the
+        // capture broke (D2): then that window was a dead track and the take is kept
+        // whole, note and transcript included.
         guard
             MeetingTranscriptionRule.shouldTranscribe(
-                duration: capture.duration, stopReason: stopReason
+                duration: capture.duration, stopReason: stopReason,
+                integrity: capture.integrity
             )
         else {
             meetingTranscription?.cancel()
