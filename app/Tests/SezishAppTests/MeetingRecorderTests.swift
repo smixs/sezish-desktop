@@ -132,10 +132,13 @@ import Testing
 
     /// `AudioDeviceStop` stuck on the HAL mutex: the stop returns when the watchdog
     /// fires, the take carries the abandoned flag, and both spools are finalized.
+    /// The tap and the mic each get their own watchdog: only the tap's fires, so the
+    /// mic's stop (which returns on its own) can never lose a race it is not in.
     @Test func theStopReturnsWhenTheSystemCaptureHangs() async throws {
         let dir = try makeDir()
         defer { try? FileManager.default.removeItem(at: dir) }
-        let watchdog = ManualWatchdog()
+        let micWatchdog = ManualWatchdog()
+        let tapWatchdog = ManualWatchdog()
         let backend = FakeTapBackend()
         let stuck = Hold()
         defer { stuck.release() }
@@ -143,20 +146,21 @@ import Testing
             meetingsDir: dir,
             makeMic: { _, _ in FakeMeetingMic() },
             makeSystem: { onSamples in
-                SystemAudioTap(backend: backend, watchdog: watchdog.schedule, onSamples16k: onSamples)
+                SystemAudioTap(backend: backend, watchdog: tapWatchdog.schedule, onSamples16k: onSamples)
             },
             stopTimeout: 5,
-            watchdog: watchdog.schedule
+            watchdog: micWatchdog.schedule
         )
 
         _ = try recorder.start(coverage: .global, device: nil)
         backend.holdStops = stuck
         let stop = Task { try await recorder.stop() }
-        await watchdog.waitForScheduled(2)
-        watchdog.fireAll()
+        await tapWatchdog.waitForScheduled(1)
+        tapWatchdog.fireAll()
         let capture = try await stop.value
 
-        #expect(watchdog.scheduledTimeouts == [5, 5])
+        #expect(micWatchdog.scheduledTimeouts == [5])
+        #expect(tapWatchdog.scheduledTimeouts == [5])
         #expect(capture.integrity.systemAbandoned)
         #expect(!capture.integrity.micAbandoned)
         #expect(!recorder.isRecording)
@@ -277,6 +281,31 @@ import Testing
         #expect(systems.all.count == 1)
         #expect(spoolDirectories(in: dir).isEmpty)
         #expect(!recorder.isRecording)
+    }
+
+    /// Owner decision D4 in production: a recorder built without a timeout (as
+    /// `AppState` builds it) waits 5 s on each capture, not whatever a test passed.
+    @Test func theDefaultStopTimeoutIsTheOwnersFiveSeconds() async throws {
+        let dir = try makeDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let watchdog = ManualWatchdog()
+        let systems = SystemCaptures()
+        let recorder = MeetingRecorder(
+            meetingsDir: dir,
+            makeMic: { _, _ in FakeMeetingMic() },
+            makeSystem: { onSamples in
+                let capture = FakeSystemCapture(onSamples: onSamples)
+                systems.add(capture)
+                return capture
+            },
+            watchdog: watchdog.schedule
+        )
+
+        _ = try recorder.start(coverage: .global, device: nil)
+        let capture = try await recorder.stop()
+        defer { try? FileManager.default.removeItem(at: capture.tempDir) }
+        #expect(watchdog.scheduledTimeouts == [5])
+        #expect(systems.all.map(\.stopTimeouts) == [[5]])
     }
 
     /// A system track a device change left without an aggregate reaches the take.

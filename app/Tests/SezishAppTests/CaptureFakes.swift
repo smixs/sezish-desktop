@@ -230,8 +230,15 @@ final class FakeSystemCapture: SystemCapture, @unchecked Sendable {
 
     func start(coverage: TapCoverage) throws {}
 
+    /// The timeout each stop was handed, in order.
+    var stopTimeouts: [TimeInterval] { lock.withLock { _stopTimeouts } }
+    private var _stopTimeouts: [TimeInterval] = []
+
     func stop(timeout: TimeInterval) async -> CaptureStopResult {
-        lock.withLock { _stops += 1 }
+        lock.withLock {
+            _stops += 1
+            _stopTimeouts.append(timeout)
+        }
         return result
     }
 }
