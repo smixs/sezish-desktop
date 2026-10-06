@@ -203,12 +203,56 @@ struct MeetingCaptureIntegrityTests {
         #expect(!healthy(seconds: 625, system: 625).isBroken(duration: 630))
     }
 
-    /// The system track is judged by its capture's own word (abandoned, or a rebuild
-    /// CoreAudio refused), not by its frame count: whether a process tap delivers
-    /// buffers while the call app plays nothing is not verified yet, and a silent call
-    /// counted as a dead track would keep every take the silence net exists to drop.
-    @Test func aSystemTrackShortOfTheClockAloneIsNotBroken() {
-        #expect(!healthy(seconds: 630, system: 6.7).isBroken(duration: 630))
+    /// Owner decision D2 counts frames on every track there is, not only the mic: a
+    /// system track whose aggregate stood but delivered nothing is a dead track. The
+    /// aggregate is clocked by the output device, so a live tap hands over a buffer
+    /// every cycle, silent or not.
+    @Test func aSystemTrackFarShortOfTheClockIsBroken() {
+        #expect(healthy(seconds: 630, system: 6.7).isBroken(duration: 630))
+        #expect(healthy(seconds: 640, system: 0).isBroken(duration: 640))
+        #expect(!MeetingTranscriptionRule.discardsAudio(
+            duration: 640, stopReason: .silence(600), integrity: healthy(seconds: 640, system: 0)))
+    }
+
+    /// Not only a track that died at once: one that went dead partway through and is
+    /// missing a noticeable share of the clock time is broken too. A mic that stopped
+    /// at 400 s of a 650 s take is missing 250 s.
+    @Test func aTrackThatDiedPartwayIsBroken() {
+        #expect(healthy(seconds: 400, system: 650).isBroken(duration: 650))
+        #expect(healthy(seconds: 650, system: 400).isBroken(duration: 650))
+        #expect(!MeetingTranscriptionRule.discardsAudio(
+            duration: 650, stopReason: .silence(600), integrity: healthy(seconds: 400, system: 650)))
+    }
+
+    /// A few seconds lost to device changes (a mic restart, an aggregate rebuild) on a
+    /// live track is not a dead track.
+    @Test func aFewSecondsOfDeviceChangeGapsAreHealthy() {
+        #expect(!healthy(seconds: 620, system: 618).isBroken(duration: 630))
+    }
+
+    /// A broken take goes the whole way (D2: always kept, a note without marks): its
+    /// trailing "silence" was a dead track, so it does not come off the duration and
+    /// the take gets its .md and transcript instead of a bare .m4a nobody can find.
+    @Test func aBrokenSilenceStoppedTakeIsTranscribed() {
+        let broken = healthy(seconds: 647, system: 0)
+        #expect(!MeetingTranscriptionRule.shouldTranscribe(duration: 647, stopReason: .silence(600)))
+        #expect(MeetingTranscriptionRule.shouldTranscribe(
+            duration: 647, stopReason: .silence(600), integrity: broken))
+        #expect(!MeetingTranscriptionRule.shouldTranscribe(
+            duration: 647, stopReason: .silence(600), integrity: healthy(seconds: 647, system: 647)))
+    }
+
+    /// Only the silence window is distrusted: the detector's stop window is the call
+    /// app letting go of the mic, and a take shorter than a minute by the clock is
+    /// still too short to transcribe, broken or not.
+    @Test func aBrokenTakeKeepsTheOtherShortTakeRules() {
+        let broken = healthy(seconds: 0, system: nil)
+        #expect(!MeetingTranscriptionRule.shouldTranscribe(
+            duration: 69, stopReason: .callEnded(10), integrity: broken))
+        #expect(!MeetingTranscriptionRule.shouldTranscribe(
+            duration: 30, stopReason: .manual, integrity: broken))
+        #expect(!MeetingTranscriptionRule.shouldTranscribe(
+            duration: 40, stopReason: .silence(30), integrity: broken))
     }
 
     /// An abandoned capture on either track, or a system track a device change left
