@@ -180,7 +180,12 @@ final class AppState {
         autoRecordMeetings = settings.autoRecordMeetings
         soundsEnabled = settings.playSounds
         notifier.onSummaryRetry = { [weak self] md in self?.retrySummary(meetingMd: md) }
-        notifier.onRestart = { [weak self] in self?.relaunch() }
+        // Only while this session's capture is broken: a restart banner left in
+        // Notification Center by an earlier session must not kill a live recording.
+        notifier.onRestart = { [weak self] in
+            guard let self, self.meetingRecorder.captureBroken else { return }
+            self.relaunch()
+        }
         notifier.prepare()
         salvageOrphanedMeetingsAtLaunch()
         // Stems parked by an earlier session; the salvage task refreshes this
