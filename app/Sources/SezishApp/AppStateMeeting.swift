@@ -94,13 +94,14 @@ extension AppState {
         }
     }
 
-    /// The detector's start is dropped with a log line, the user's own gets the
-    /// restart banner again: a press that silently does nothing would look broken.
+    /// Dropped with a log line, the user's own press as well as the detector's: the
+    /// restart banner (D3) belongs to the take that was saved, and repeating its
+    /// «Запись сохранена» on a press that saved nothing would send the user looking
+    /// for a take that does not exist.
     private func refuseMeetingStartWhileAudioBroken(source: MeetingStartSource) {
         meetingStartLog.notice(
             "meeting start refused: capture abandoned earlier, waiting for a restart (\(source.isAuto ? "auto" : "manual", privacy: .public))"
         )
-        if !source.isAuto { notifyMeetingAudioBroken() }
     }
 
     /// Owner decision D3: the take is saved, CoreAudio in this process is not to be
