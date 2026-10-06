@@ -23,12 +23,21 @@ enum MicError: LocalizedError {
     }
 }
 
+/// The meeting recorder's microphone. Its stop is synchronous on purpose: the
+/// recorder runs it on a dispatch queue of its own under a watchdog, because an
+/// `AVAudioEngine.stop` on a broken HAL may never return, and an async stop would park
+/// that hang on a cooperative-pool thread for good.
+nonisolated protocol MeetingMicCapture: Sendable {
+    func start() throws
+    func stopSynchronously()
+}
+
 /// Captures the mic with `AVAudioEngine`, resampling every buffer to 16 kHz mono
 /// Float32 on the fly. A fresh engine is built on each `start()` and fully retired on
 /// `stop()` (stop + reset) — the FluidVoice pattern that avoids the input node sticking.
 /// `nonisolated` + a lock because the tap callback runs on a realtime audio thread while
 /// `stop()` reads the buffer from a background executor.
-nonisolated final class MicRecorder: MicCapture, @unchecked Sendable {
+nonisolated final class MicRecorder: MicCapture, MeetingMicCapture, @unchecked Sendable {
     private let lock = NSLock()
     private var engine: AVAudioEngine?
     private var samples: [Float] = []
@@ -101,6 +110,15 @@ nonisolated final class MicRecorder: MicCapture, @unchecked Sendable {
     }
 
     func stop() async throws -> [Float] {
+        halt()
+    }
+
+    func stopSynchronously() {
+        _ = halt()
+    }
+
+    /// Retires the engine and hands back whatever the buffered path accumulated.
+    private func halt() -> [Float] {
         let (engine, captured): (AVAudioEngine?, [Float]) = lock.withLock {
             let engine = self.engine
             let captured = samples

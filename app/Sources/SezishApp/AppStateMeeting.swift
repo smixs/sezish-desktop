@@ -51,6 +51,12 @@ extension AppState {
 
     func startMeetingRecording(source: MeetingStartSource) {
         guard status == .idle else { return }
+        // Owner decision D3: after an abandoned capture no meeting records until the
+        // app restarts, neither the detector's nor a manual one.
+        guard !meetingRecorder.captureBroken else {
+            refuseMeetingStartWhileAudioBroken(source: source)
+            return
+        }
         switch source {
         case .auto(let bundleID):
             meetingStartLog.notice("meeting start: auto (\(bundleID ?? "unknown", privacy: .public))")
@@ -86,6 +92,23 @@ extension AppState {
             )
             meetingStartFailed(pipeline)
         }
+    }
+
+    /// The detector's start is dropped with a log line, the user's own gets the
+    /// restart banner again: a press that silently does nothing would look broken.
+    private func refuseMeetingStartWhileAudioBroken(source: MeetingStartSource) {
+        meetingStartLog.notice(
+            "meeting start refused: capture abandoned earlier, waiting for a restart (\(source.isAuto ? "auto" : "manual", privacy: .public))"
+        )
+        if !source.isAuto { notifyMeetingAudioBroken() }
+    }
+
+    /// Owner decision D3: the take is saved, CoreAudio in this process is not to be
+    /// trusted again, and the one button restarts the app.
+    private func notifyMeetingAudioBroken() {
+        notifier.notify(
+            title: "sezish", body: strings.notifMeetingAudioBroken, restart: strings.restart
+        )
     }
 
     /// A meeting that never started leaves no trace: no call app, no pipeline and
@@ -501,7 +524,9 @@ extension AppState {
         // debounce stays `.active` and the next call in that app would never start a
         // recording. Re-arming it is safe because a silence-stopped take with no
         // meeting in it is deleted whole, so the loop "record, go quiet, stop"
-        // cannot leave orphans behind.
+        // cannot leave orphans behind. A take whose capture broke is kept instead
+        // (D2), but one whose capture was abandoned also blocks every later start
+        // until the app restarts (D3), so the loop cannot run on a stuck HAL.
         if reason.isSilenceStop { meetingDetector?.rearm() }
         // The nets die with the recording — a stop is a stop, whoever asked for it,
         // and the poll must not fire again while the take is being mixed down.
@@ -525,6 +550,8 @@ extension AppState {
             let capture = try await meetingRecorder.stop()
             guard keepTake(capture, stopReason: reason) else { return }
             await runMeetingPipeline(capture, stopReason: reason)
+            // After the take is on disk: the banner says it was saved.
+            if capture.integrity.abandoned { notifyMeetingAudioBroken() }
         } catch {
             meetingTranscription?.cancel()
             notifier.notify(title: "sezish", body: strings.notifMeetingFailed)
@@ -599,13 +626,14 @@ extension AppState {
 
     /// A take the silence net ended with no meeting in it leaves nothing at all: no
     /// audio, no .md, no banner — that is the only case where the app throws recorded
-    /// audio away (`MeetingTranscriptionRule.discardsAudio`). Checked before a single
-    /// byte is written. Answers whether there is anything left to work on.
+    /// audio away (`MeetingTranscriptionRule.discardsAudio`). A take whose capture
+    /// broke is never that case (D2). Checked before a single byte is written.
+    /// Answers whether there is anything left to work on.
     private func keepTake(
         _ capture: MeetingRecorder.Capture, stopReason: MeetingStopReason
     ) -> Bool {
         guard MeetingTranscriptionRule.discardsAudio(
-            duration: capture.duration, stopReason: stopReason
+            duration: capture.duration, stopReason: stopReason, integrity: capture.integrity
         ) else {
             // The take is a take: the user is told why the app stopped it, in the
             // units `SezishCore` chose for that reason.

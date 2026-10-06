@@ -14,21 +14,37 @@ final class Notifier {
 
     /// Set by `AppState`: the user pressed "retry" on a failed-summary banner.
     var onSummaryRetry: (@MainActor (URL) -> Void)?
+    /// Set by `AppState`: the user pressed "restart" on the broken-audio banner.
+    var onRestart: (@MainActor () -> Void)?
+    /// Every category with a button registered so far. The center replaces its
+    /// categories wholesale on each call, so each call re-registers all of them: a
+    /// retry banner still on screen keeps its button when a restart banner arrives.
+    private var categories: [String: UNNotificationCategory] = [:]
 
     /// Ask for permission up front so the first real notification isn't dropped.
     func prepare() {
         guard hasBundle else { return }
         requestAuthorizationOnce()
-        let delegate = Delegate { [weak self] md in
-            Task { @MainActor in self?.onSummaryRetry?(md) }
-        }
+        let delegate = Delegate(
+            onRetry: { [weak self] md in
+                Task { @MainActor in self?.onSummaryRetry?(md) }
+            },
+            onRestart: { [weak self] in
+                Task { @MainActor in self?.onRestart?() }
+            }
+        )
         self.delegate = delegate
         UNUserNotificationCenter.current().delegate = delegate
     }
 
     /// - Parameter retry: the meeting a "retry" button should re-run, and the button's
     ///   already-localized title. Nil: a plain banner.
-    func notify(title: String, body: String, retry: (meeting: URL, actionTitle: String)? = nil) {
+    /// - Parameter restart: the already-localized title of a button that restarts the
+    ///   app. Nil: no such button.
+    func notify(
+        title: String, body: String, retry: (meeting: URL, actionTitle: String)? = nil,
+        restart: String? = nil
+    ) {
         guard hasBundle else { return }
         requestAuthorizationOnce()
 
@@ -36,25 +52,37 @@ final class Notifier {
         content.title = title
         content.body = body
         if let retry {
-            // Categories are replaced wholesale on every call; this is the only one, and
-            // re-registering is what lets the button follow a language change.
-            let action = UNNotificationAction(
-                identifier: Self.retryActionID, title: retry.actionTitle, options: [])
-            UNUserNotificationCenter.current().setNotificationCategories([
-                UNNotificationCategory(
-                    identifier: Self.retryCategoryID, actions: [action],
-                    intentIdentifiers: [], options: [])
-            ])
+            // Re-registered on every call: that is what lets the button follow a
+            // language change.
+            register(category: Self.retryCategoryID, action: Self.retryActionID, title: retry.actionTitle)
             content.categoryIdentifier = Self.retryCategoryID
             content.userInfo = Self.retryUserInfo(for: retry.meeting)
+        } else if let restart {
+            register(category: Self.restartCategoryID, action: Self.restartActionID, title: restart)
+            content.categoryIdentifier = Self.restartCategoryID
         }
         let request = UNNotificationRequest(
             identifier: UUID().uuidString, content: content, trigger: nil)
         UNUserNotificationCenter.current().add(request)
     }
 
+    private func register(category: String, action: String, title: String) {
+        categories[category] = UNNotificationCategory(
+            identifier: category,
+            actions: [UNNotificationAction(identifier: action, title: title, options: [])],
+            intentIdentifiers: [], options: [])
+        UNUserNotificationCenter.current().setNotificationCategories(Set(categories.values))
+    }
+
     nonisolated static let retryActionID = "sezish.summary.retry"
     nonisolated static let retryCategoryID = "sezish.summary.failed"
+    nonisolated static let restartActionID = "sezish.app.restart"
+    nonisolated static let restartCategoryID = "sezish.audio.broken"
+
+    /// Only the button restarts: a plain click on the banner just opens the app.
+    nonisolated static func isRestartRequest(actionIdentifier: String) -> Bool {
+        actionIdentifier == restartActionID
+    }
     private nonisolated static let meetingKey = "meetingMd"
 
     nonisolated static func retryUserInfo(for md: URL) -> [AnyHashable: Any] {
@@ -82,9 +110,14 @@ final class Notifier {
     /// (it would be swallowed otherwise).
     private final class Delegate: NSObject, UNUserNotificationCenterDelegate {
         private let onRetry: @Sendable (URL) -> Void
+        private let onRestart: @Sendable () -> Void
 
-        init(onRetry: @escaping @Sendable (URL) -> Void) {
+        init(
+            onRetry: @escaping @Sendable (URL) -> Void,
+            onRestart: @escaping @Sendable () -> Void
+        ) {
             self.onRetry = onRetry
+            self.onRestart = onRestart
         }
 
         nonisolated func userNotificationCenter(
@@ -97,6 +130,8 @@ final class Notifier {
                 userInfo: response.notification.request.content.userInfo)
             {
                 onRetry(md)
+            } else if Notifier.isRestartRequest(actionIdentifier: response.actionIdentifier) {
+                onRestart()
             }
             completionHandler()
         }

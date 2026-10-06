@@ -282,9 +282,10 @@ private final class OddCallFailingTranscriber: Transcriber, @unchecked Sendable 
         }
         #expect(audioExists(in: dir, base: mdURL.deletingPathExtension().lastPathComponent))
         let md = try String(contentsOf: mdURL, encoding: .utf8)
-        #expect(md.contains("их текст"))
+        // The system track alone still speaks as "them": the pipeline labels by
+        // stream, and the mic stream merely delivered nothing.
+        #expect(md.contains("\(Strings.ru.meetingSpeakerThem): их текст"))
         #expect(!md.contains("мой текст"))
-        #expect(!md.contains("\(Strings.ru.meetingSpeakerThem):"))
         #expect(md.contains("\(Strings.ru.meetingDocDuration): 0:07"))
         #expect(!FileManager.default.fileExists(atPath: orphan.path))
     }

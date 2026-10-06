@@ -8,7 +8,7 @@ import Testing
 /// its callback may still fire, so the stem has to refuse deliveries once closed, and
 /// the finalize has to run on the stem's own queue: `PCMSpoolFile` is not thread-safe,
 /// and an append racing the header patch would corrupt the take.
-@Suite struct MeetingStemTests {
+@Suite(.timeLimit(.minutes(1))) struct MeetingStemTests {
     private func makeStem() throws -> (MeetingStem, URL) {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("stem-\(UUID().uuidString).wav")
@@ -50,10 +50,13 @@ import Testing
         for _ in 0..<4 {
             DispatchQueue.global().async(group: done) {
                 started.signal()
-                for _ in 0..<200 { stem.ingest([Float](repeating: 0.2, count: 160)) }
+                // Far more than the finish needs to start: the deliveries run on
+                // through it and past it.
+                for _ in 0..<3_000 { stem.ingest([Float](repeating: 0.2, count: 160)) }
             }
         }
         for _ in 0..<4 { started.wait() }
+        for _ in 0..<50 { stem.ingest([Float](repeating: 0.2, count: 160)) }
         let frames = try stem.finish()
         done.wait()
 
@@ -61,3 +64,4 @@ import Testing
         #expect(try fileSize(url) == 44 + frames * 2)
     }
 }
+

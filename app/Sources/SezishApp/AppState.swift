@@ -180,6 +180,7 @@ final class AppState {
         autoRecordMeetings = settings.autoRecordMeetings
         soundsEnabled = settings.playSounds
         notifier.onSummaryRetry = { [weak self] md in self?.retrySummary(meetingMd: md) }
+        notifier.onRestart = { [weak self] in self?.relaunch() }
         notifier.prepare()
         salvageOrphanedMeetingsAtLaunch()
         // Stems parked by an earlier session; the salvage task refreshes this
@@ -316,7 +317,8 @@ final class AppState {
     }
 
     /// Relaunches the app: spawns a fresh instance via `open -n`, then quits this one. Used to
-    /// recover when the event tap won't install despite an Accessibility grant.
+    /// recover when the event tap won't install despite an Accessibility grant, and from the
+    /// banner after a meeting capture had to be abandoned (CoreAudio broken in this process).
     func relaunch() {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/open")

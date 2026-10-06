@@ -1,6 +1,11 @@
 import AudioToolbox
 import Foundation
 import SezishCore
+import os
+
+/// One line per stop: clock time against what each stem holds, and how each capture's
+/// stop ended. "Ten minutes, zero mic frames" was invisible until now.
+private nonisolated let captureLog = Logger(subsystem: "com.smixs.sezish", category: "meeting-stop")
 
 /// Orchestrates a meeting capture: mic stem (own AVAudioEngine instance,
 /// independent of the dictation recorder) + system-audio stem (process tap),
@@ -9,21 +14,49 @@ import SezishCore
 final class MeetingRecorder {
     /// Builds this recording's microphone. Injectable because the device id handed over
     /// here is the whole mic route, and nothing else in the app can see what reached it.
-    typealias MicFactory = (AudioDeviceID?, @escaping @Sendable ([Float]) -> Void) -> MicCapture
+    typealias MicFactory = (AudioDeviceID?, @escaping @Sendable ([Float]) -> Void) -> MeetingMicCapture
+    /// Builds this recording's system-audio capture. Injectable for the same reason as
+    /// the mic: the stop logic is held by tests against captures that hang.
+    typealias SystemFactory = (@escaping @Sendable ([Float]) -> Void) -> SystemCapture
 
+    /// The owner's limit (D4): how long a stop waits for either capture.
+    nonisolated static let defaultStopTimeout: TimeInterval = 5
+
+    private let meetingsDir: URL
     private let makeMic: MicFactory
+    private let makeSystem: SystemFactory
+    private let stopTimeout: TimeInterval
+    private let watchdog: StopWatchdog
 
-    init(makeMic: @escaping MicFactory = MeetingRecorder.engineMic) {
+    init(
+        meetingsDir: URL = MeetingRecorder.meetingsDirectory,
+        makeMic: @escaping MicFactory = MeetingRecorder.engineMic,
+        makeSystem: @escaping SystemFactory = MeetingRecorder.coreAudioSystem,
+        stopTimeout: TimeInterval = MeetingRecorder.defaultStopTimeout,
+        watchdog: @escaping StopWatchdog = GuardedStop.realWatchdog
+    ) {
+        self.meetingsDir = meetingsDir
         self.makeMic = makeMic
+        self.makeSystem = makeSystem
+        self.stopTimeout = stopTimeout
+        self.watchdog = watchdog
     }
 
     /// The real mic: a fresh `AVAudioEngine`, pinned to `deviceID` before the format is
-    /// read and the tap installed. nil is the engine's own default — dictation's way.
+    /// read and the tap installed. nil is the engine's own default: dictation's way.
     nonisolated static func engineMic(
         deviceID: AudioDeviceID?, onSamples16k: @escaping @Sendable ([Float]) -> Void
-    ) -> MicCapture {
+    ) -> MeetingMicCapture {
         MicRecorder(deviceID: deviceID, onSamples16k: onSamples16k)
     }
+
+    /// The real system audio: a process tap on CoreAudio.
+    nonisolated static func coreAudioSystem(
+        onSamples16k: @escaping @Sendable ([Float]) -> Void
+    ) -> SystemCapture {
+        SystemAudioTap(onSamples16k: onSamples16k)
+    }
+
     enum StartOutcome {
         case full
         /// System-audio tap failed (typically TCC denied): recording continues
@@ -36,14 +69,24 @@ final class MeetingRecorder {
         let duration: TimeInterval
         let systemAudioCaptured: Bool
         let tempDir: URL
+        /// Frames per stem and how each capture's stop ended.
+        let integrity: MeetingCaptureIntegrity
     }
 
     enum MeetingRecorderError: Error {
         case notRecording
+        /// A capture of an earlier take had to be abandoned (owner decision D3):
+        /// CoreAudio in this process is not trusted again until the app restarts.
+        case captureBroken
     }
 
-    private var mic: (any MicCapture)?
-    private var tap: SystemAudioTap?
+    private var mic: (any MeetingMicCapture)?
+    private var system: (any SystemCapture)?
+    /// Shut first thing on stop: whatever a capture still delivers after that, live
+    /// or abandoned, reaches neither the stems, nor the pipeline, nor the loudness
+    /// signals the next take inherits.
+    private var micGate: SampleGate?
+    private var systemGate: SampleGate?
     private var micStem: MeetingStem?
     private var systemStem: MeetingStem?
     private var tempDir: URL?
@@ -56,6 +99,11 @@ final class MeetingRecorder {
     private var loudnessPolledAt: Date?
 
     var isRecording: Bool { startDate != nil }
+
+    /// Set for good when a stop had to abandon a capture: every later start refuses
+    /// at once, before a single CoreAudio call, so a stuck HAL can neither hang the
+    /// main thread on the next start nor pile up taps until the app restarts.
+    private(set) var captureBroken = false
 
     static var meetingsDirectory: URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -76,8 +124,9 @@ final class MeetingRecorder {
         pipeline: MeetingTranscriptionPipeline? = nil
     ) throws -> StartOutcome {
         guard !isRecording else { return .full }
+        guard !captureBroken else { throw MeetingRecorderError.captureBroken }
 
-        let dir = Self.meetingsDirectory
+        let dir = meetingsDir
             .appendingPathComponent(".rec-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
 
@@ -90,10 +139,13 @@ final class MeetingRecorder {
 
         // Mic first: the user's own voice is the non-negotiable half.
         let micLoudness = self.micLoudness
-        let mic = makeMic(device) {
-            micStem.ingest($0)
-            pipeline?.ingestMic($0)
-            micLoudness.ingest($0)
+        let micGate = SampleGate()
+        let mic = makeMic(device) { samples in
+            micGate.pass {
+                micStem.ingest(samples)
+                pipeline?.ingestMic(samples)
+                micLoudness.ingest(samples)
+            }
         }
         do {
             try mic.start()
@@ -104,25 +156,31 @@ final class MeetingRecorder {
 
         var outcome = StartOutcome.full
         let systemLoudness = self.systemLoudness
-        let tap = SystemAudioTap(onSamples16k: {
-            systemStem.ingest($0)
-            pipeline?.ingestSystem($0)
-            systemLoudness.ingest($0)
-        })
+        let systemGate = SampleGate()
+        let system = makeSystem { samples in
+            systemGate.pass {
+                systemStem.ingest(samples)
+                pipeline?.ingestSystem(samples)
+                systemLoudness.ingest(samples)
+            }
+        }
         do {
-            try tap.start(coverage: coverage)
-            self.tap = tap
+            try system.start(coverage: coverage)
+            self.system = system
             self.systemStem = systemStem
+            self.systemGate = systemGate
         } catch {
             // Mic survives without the system half: a one-sided record beats none.
             outcome = .micOnly(error)
-            self.tap = nil
+            self.system = nil
             self.systemStem = nil
+            self.systemGate = nil
             pipeline?.systemStreamUnavailable()
         }
 
         self.mic = mic
         self.micStem = micStem
+        self.micGate = micGate
         self.tempDir = dir
         self.startDate = Date()
         loudnessPolledAt = self.startDate
@@ -136,26 +194,52 @@ final class MeetingRecorder {
         let since = loudnessPolledAt ?? now
         loudnessPolledAt = now
         let mic = micLoudness.isLoud(since: since)
-        guard tap != nil else { return (mic: mic, system: false) }
+        guard system != nil else { return (mic: mic, system: false) }
         return (mic: mic, system: systemLoudness.isLoud(since: since))
     }
 
+    /// Never waits on a capture synchronously: each stop runs under the watchdog, and
+    /// a capture that does not come back in `stopTimeout` is abandoned. The take is
+    /// written from whatever reached the disk either way.
     func stop() async throws -> Capture {
-        guard let startDate, let tempDir, let mic, let micStem else {
+        guard let startDate, let tempDir, let mic, let micStem, let micGate else {
             throw MeetingRecorderError.notRecording
         }
         let duration = Date().timeIntervalSince(startDate)
         let systemStem = systemStem
-        let systemCaptured = tap != nil
+        let system = system
+        let systemGate = systemGate
+        let systemCaptured = system != nil
+        let timeout = stopTimeout
+        let watchdog = watchdog
 
-        _ = try? await mic.stop() // streaming mode returns []
-        tap?.stop()
+        micGate.close()
+        systemGate?.close()
         resetState()
+
+        async let micStop = GuardedStop.run(
+            on: DispatchQueue(label: "com.smixs.sezish.meeting-mic.stop", qos: .userInitiated),
+            timeout: timeout, watchdog: watchdog
+        ) { mic.stopSynchronously() }
+        async let systemStop = Self.stop(system, timeout: timeout)
+        let micResult = await micStop
+        let systemResult = await systemStop
+        let systemLost = system?.lostDuringRecording ?? false
+        if micResult == .abandoned || systemResult == .abandoned {
+            captureBroken = true
+        }
 
         // Finalize + chunked mixdown off the main actor (hundreds of MB for long calls).
         return try await Task.detached(priority: .userInitiated) {
-            _ = try micStem.finish()
-            _ = try systemStem?.finish()
+            let micFrames = try micStem.finish()
+            let systemFrames = try systemStem?.finish()
+            let integrity = MeetingCaptureIntegrity(
+                micFrames: micFrames, systemFrames: systemFrames,
+                micAbandoned: micResult == .abandoned,
+                systemAbandoned: systemResult == .abandoned,
+                systemLost: systemLost
+            )
+            Self.log(integrity, duration: duration)
 
             let micReader = try PCMSpoolReader(url: tempDir.appendingPathComponent("mic.wav"))
             let systemReader = systemCaptured
@@ -175,14 +259,44 @@ final class MeetingRecorder {
                 mixed16k: mixed,
                 duration: duration,
                 systemAudioCaptured: systemReader != nil,
-                tempDir: tempDir
+                tempDir: tempDir,
+                integrity: integrity
             )
         }.value
     }
 
+    /// A recording without a system capture has nothing to stop.
+    private nonisolated static func stop(
+        _ system: (any SystemCapture)?, timeout: TimeInterval
+    ) async -> CaptureStopResult {
+        guard let system else { return .stopped }
+        return await system.stop(timeout: timeout)
+    }
+
+    private nonisolated static func log(_ integrity: MeetingCaptureIntegrity, duration: TimeInterval) {
+        let rate = Double(MeetingCaptureIntegrity.sampleRate)
+        let mic = Double(integrity.micFrames) / rate
+        let system = integrity.systemFrames.map { String(format: "%.1f s", Double($0) / rate) } ?? "none"
+        let line = String(
+            format: "meeting capture: %.1f s by clock, mic %.1f s%@, system %@%@%@",
+            duration, mic,
+            integrity.micAbandoned ? " (stop abandoned)" : "",
+            system,
+            integrity.systemAbandoned ? " (stop abandoned)" : "",
+            integrity.systemLost ? " (rebuild failed)" : ""
+        )
+        if integrity.abandoned || integrity.isBroken(duration: duration) {
+            captureLog.error("\(line, privacy: .public)")
+        } else {
+            captureLog.notice("\(line, privacy: .public)")
+        }
+    }
+
     private func resetState() {
         mic = nil
-        tap = nil
+        system = nil
+        micGate = nil
+        systemGate = nil
         micStem = nil
         systemStem = nil
         tempDir = nil
@@ -220,5 +334,24 @@ private nonisolated final class MeetingLoudnessSignal: @unchecked Sendable {
             meter.reset()
             lastLoudAt = nil
         }
+    }
+}
+
+/// One capture's door to the rest of the recording. The check and the delivery run
+/// under one lock, so once `close()` returns no delivery is in flight and none will
+/// follow.
+private nonisolated final class SampleGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var open = true
+
+    func pass(_ deliver: () -> Void) {
+        lock.withLock {
+            guard open else { return }
+            deliver()
+        }
+    }
+
+    func close() {
+        lock.withLock { open = false }
     }
 }

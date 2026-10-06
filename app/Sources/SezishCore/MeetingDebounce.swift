@@ -106,10 +106,58 @@ public enum MeetingTranscriptionRule {
     /// it — an app that holds the mic open would otherwise leave one orphan .m4a
     /// per round of "record, go quiet, stop", and nobody ever saw those takes.
     /// Every other short recording keeps its audio: those seconds are the user's.
+    ///
+    /// `integrity` is what the capture itself reported. A broken capture is never
+    /// thrown away (owner decision D2, 06.10.2026): its "silence" was a dead track,
+    /// not a quiet call, and the seconds that did reach the disk are the user's.
     public static func discardsAudio(
-        duration: TimeInterval, stopReason: MeetingStopReason
+        duration: TimeInterval, stopReason: MeetingStopReason,
+        integrity: MeetingCaptureIntegrity? = nil
     ) -> Bool {
         guard stopReason.isSilenceStop else { return false }
+        if integrity?.isBroken(duration: duration) == true { return false }
         return !shouldTranscribe(duration: duration, stopReason: stopReason)
+    }
+}
+
+/// What a meeting's capture reported at its stop: frames per stem, and whether a
+/// capture had to be given up on.
+public struct MeetingCaptureIntegrity: Sendable, Equatable {
+    /// The stems' rate: every frame is 1/16000 s of the take.
+    public static let sampleRate = 16_000
+    /// A mic delivering less than this share of the clock time stopped receiving
+    /// data somewhere: `AVAudioEngine` hands over buffers in silence too, so a live
+    /// mic falls short only by a buffer at the start and the tail at the stop.
+    public static let starvedShare = 0.5
+
+    public var micFrames: Int
+    /// nil: the recording had no system stem (the tap failed at the start).
+    public var systemFrames: Int?
+    public var micAbandoned: Bool
+    public var systemAbandoned: Bool
+    /// A device change left the system track without an aggregate at least once.
+    public var systemLost: Bool
+
+    public init(
+        micFrames: Int, systemFrames: Int?,
+        micAbandoned: Bool, systemAbandoned: Bool, systemLost: Bool
+    ) {
+        self.micFrames = micFrames
+        self.systemFrames = systemFrames
+        self.micAbandoned = micAbandoned
+        self.systemAbandoned = systemAbandoned
+        self.systemLost = systemLost
+    }
+
+    /// A stop on either track never came back within its timeout.
+    public var abandoned: Bool { micAbandoned || systemAbandoned }
+
+    /// The system track is judged by its capture's own word, not by its frames:
+    /// whether a process tap delivers buffers while the call app plays nothing is
+    /// not verified, and a quiet call must not read as a dead track.
+    public func isBroken(duration: TimeInterval) -> Bool {
+        if abandoned || systemLost { return true }
+        let expected = duration * Double(Self.sampleRate)
+        return Double(micFrames) < expected * Self.starvedShare
     }
 }

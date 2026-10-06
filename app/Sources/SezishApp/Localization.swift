@@ -135,6 +135,10 @@ struct Strings {
     let notifLocalLongMeeting: String
     /// Fired once per meeting rebuilt from stems a crash left behind.
     let notifMeetingRecovered: String
+    /// A capture had to be abandoned on a stop that never returned: the take is
+    /// saved, and no meeting records again until the app restarts. The banner's
+    /// button carries `restart`.
+    let notifMeetingAudioBroken: String
     /// Fired when the summary CLI finished and the vault cards are on disk.
     let notifSummaryReady: String
     let notifSummaryCardsFailed: String
@@ -339,6 +343,7 @@ extension Strings {
         notifMeetingNoTranscript: "Текст не распознался, аудио встречи сохранено.",
         notifLocalLongMeeting: "Длинная запись в локальном режиме: распознавание займёт несколько минут и много памяти.",
         notifMeetingRecovered: "Запись встречи восстановлена после сбоя",
+        notifMeetingAudioBroken: "Запись сохранена. macOS сломала звук в sezish, перезапусти его, чтобы записывать снова.",
         notifSummaryReady: "Саммари встречи готово",
         notifSummaryCardsFailed: "Карточки встречи не собрались",
         notifSummaryRetryAction: "Повторить",
@@ -490,6 +495,7 @@ extension Strings {
         notifMeetingNoTranscript: "Matn aniqlanmadi, uchrashuv audiosi saqlandi.",
         notifLocalLongMeeting: "Lokal rejimda uzun yozuv: aniqlash bir necha daqiqa va koʼp xotira oladi.",
         notifMeetingRecovered: "Uchrashuv yozuvi tiklandi",
+        notifMeetingAudioBroken: "Yozuv saqlandi. macOS sezishda ovozni buzib qoʼydi, yana yozish uchun uni qayta ishga tushiring.",
         notifSummaryReady: "Uchrashuv xulosasi tayyor",
         notifSummaryCardsFailed: "Uchrashuv kartochkalari yigʼilmadi",
         notifSummaryRetryAction: "Qayta urinish",
