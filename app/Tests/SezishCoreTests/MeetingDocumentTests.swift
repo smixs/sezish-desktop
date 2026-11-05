@@ -138,3 +138,44 @@ struct DayGroupingTests {
         #expect(!TextSearch.matches("zoom", in: ["Звонок в Telegram"]))
     }
 }
+
+/// After the summary the meeting takes the card's title, unless the user
+/// already named it (specs/tla/MeetingTitle.tla: UserWins, NamedAfterSummary).
+struct MeetingTitleFromSummaryTests {
+    private let names = MeetingTitle.AutoNames(plain: ["Запись звонка", "Qoʼngʼiroq yozuvi"],
+                                               withApp: ["Звонок в %@", "%@ qoʼngʼirogʼi"])
+    private let card = """
+    ---
+    type: meeting
+    description: запуск
+    ---
+    # Запуск sezish с [[people/aziz|Азизом]]
+
+    Обсудили запуск.
+    """
+
+    @Test func knowsTheNamesTheAppGives() {
+        #expect(names.isAutomatic("Запись звонка"))
+        #expect(names.isAutomatic("Звонок в Telegram"))
+        #expect(names.isAutomatic("Zoom qoʼngʼirogʼi"))
+        #expect(!names.isAutomatic("Запуск с Азизом"))
+        #expect(!names.isAutomatic("Звонок в "))
+    }
+
+    @Test func readsTheCardTitlePastTheFrontmatter() {
+        #expect(SummaryCard.title(of: card) == "Запуск sezish с Азизом")
+        #expect(SummaryCard.title(of: "---\na: b\n---\nтекст без заголовка") == nil)
+    }
+
+    @Test func anAutomaticNameTakesTheCardTitle() {
+        let md = "# Звонок в Telegram - 5 ноября 2026 г. в 8:03\n\nДлительность: 1:02\n"
+        #expect(MeetingTitle.fromSummary(md, card: card, names: names)
+            == "# Запуск sezish с Азизом - 5 ноября 2026 г. в 8:03\n\nДлительность: 1:02\n")
+    }
+
+    @Test func aNameTheUserGaveStays() {
+        let md = "# Созвон с бухгалтером - 5 ноября 2026 г. в 8:03\n\nДлительность: 1:02\n"
+        #expect(MeetingTitle.fromSummary(md, card: card, names: names) == nil)
+        #expect(MeetingTitle.fromSummary("# Запись звонка - 5 ноября\n", card: "без заголовка", names: names) == nil)
+    }
+}
