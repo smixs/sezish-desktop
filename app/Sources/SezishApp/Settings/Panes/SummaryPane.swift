@@ -104,6 +104,8 @@ struct SummaryPane: View {
         guard panel.runModal() == .OK, let url = panel.url else { return }
         appState.settings.notesFolder = url
         notesFolderVersion += 1
+        // Meetings already summarized into this vault take their cards' titles now.
+        appState.nameSummarizedMeetings()
     }
 
     private var summaryEnabledBinding: Binding<Bool> {
