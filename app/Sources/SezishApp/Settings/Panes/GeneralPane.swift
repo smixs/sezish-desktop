@@ -177,6 +177,7 @@ struct GeneralPane: View {
         case .cloud: appState.strings.cloudTitle
         case .local: appState.strings.localTitle
         case .gemini: appState.strings.geminiTitle
+        case .openai: appState.strings.openaiTitle
         }
     }
 

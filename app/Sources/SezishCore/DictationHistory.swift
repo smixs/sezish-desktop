@@ -107,9 +107,14 @@ public final class DictationHistory {
     }
 }
 
-/// Minimal 16-bit PCM mono WAV encoder (16 kHz by default).
-private enum WAVFile {
+/// Minimal 16-bit PCM mono WAV encoder (16 kHz by default). History writes it to
+/// disk; the OpenAI engine uploads it.
+public enum WAVFile {
     static func write(_ samples: [Float], to url: URL, sampleRate: Int = 16_000) throws {
+        try data(samples, sampleRate: sampleRate).write(to: url, options: .atomic)
+    }
+
+    public static func data(_ samples: [Float], sampleRate: Int = 16_000) -> Data {
         let dataSize = samples.count * 2
         var out = Data(capacity: 44 + dataSize)
         out.append(ascii: "RIFF")
@@ -130,7 +135,7 @@ private enum WAVFile {
             let value = Int16(clamped * Float(Int16.max))
             out.append(uint16: UInt16(bitPattern: value))
         }
-        try out.write(to: url, options: .atomic)
+        return out
     }
 }
 

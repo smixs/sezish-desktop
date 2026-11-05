@@ -26,6 +26,9 @@ struct RecognitionPane: View {
                     option(title: appState.strings.geminiTitle,
                            subtitle: appState.strings.geminiSubtitle)
                         .tag(TranscriptionMode.gemini)
+                    option(title: appState.strings.openaiTitle,
+                           subtitle: appState.strings.openaiSubtitle)
+                        .tag(TranscriptionMode.openai)
                 } label: {
                     EmptyView()
                 }
@@ -40,6 +43,7 @@ struct RecognitionPane: View {
             }
 
             if appState.transcriptionMode == .gemini { geminiSection }
+            if appState.transcriptionMode == .openai { openaiSection }
 
             if appState.usesLocalTranscription {
                 Section {
@@ -141,6 +145,58 @@ struct RecognitionPane: View {
     }
 
     private static let apiKeyURL = URL(string: "https://aistudio.google.com/apikey")!
+    private static let openaiKeyURL = URL(string: "https://platform.openai.com/api-keys")!
+
+    private var openaiKeyBinding: Binding<String> {
+        // Straight through to AppSettings, like the Gemini key.
+        Binding(
+            get: { appState.settings.openaiApiKey ?? "" },
+            set: { appState.setOpenAIApiKey($0) }
+        )
+    }
+
+    private var openaiModelBinding: Binding<OpenAIModel> {
+        Binding(
+            get: { appState.settings.openaiModel },
+            set: { appState.setOpenAIModel($0) }
+        )
+    }
+
+    @ViewBuilder private var openaiSection: some View {
+        Section {
+            LabeledContent(appState.strings.geminiKeyLabel) {
+                SecureField(appState.strings.geminiKeyPlaceholder, text: openaiKeyBinding)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(maxWidth: 260)
+            }
+            Picker(selection: openaiModelBinding) {
+                option(title: appState.strings.openaiModelTranscribe,
+                       subtitle: appState.strings.openaiModelTranscribeHint)
+                    .tag(OpenAIModel.transcribe)
+                option(title: appState.strings.openaiModelMini,
+                       subtitle: appState.strings.openaiModelMiniHint)
+                    .tag(OpenAIModel.mini)
+            } label: {
+                EmptyView()
+            }
+            .pickerStyle(.radioGroup)
+            .labelsHidden()
+            Link(appState.strings.geminiGetKey, destination: Self.openaiKeyURL)
+                .font(.system(size: 11))
+        } header: {
+            Text(appState.strings.openaiTitle)
+        } footer: {
+            if appState.settings.openaiApiKey == nil {
+                Text(appState.strings.geminiKeyMissing)
+                    .font(.system(size: 11))
+                    .foregroundStyle(Brand.red)
+            } else {
+                Text(appState.strings.openaiFooter)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
 
     private var modelBinding: Binding<AsrModel> {
         Binding(get: { appState.localModel }, set: { appState.setLocalModel($0) })

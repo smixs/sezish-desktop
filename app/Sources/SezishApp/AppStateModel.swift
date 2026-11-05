@@ -157,6 +157,7 @@ extension AppState {
         case .cloud: mode.rawValue
         case .local: "local/\(localModel.rawValue)"
         case .gemini: settings.geminiSmartMode ? "gemini/live-smart" : "gemini/live-verbatim"
+        case .openai: "openai/\(settings.openaiModel.rawValue)"
         }
     }
 
@@ -175,6 +176,9 @@ extension AppState {
             guard let key = settings.geminiApiKey else { return nil }
             return GeminiLiveTranscriber(
                 apiKey: key, mode: settings.geminiSmartMode ? .smart : .verbatim)
+        case .openai:
+            guard let key = settings.openaiApiKey else { return nil }
+            return OpenAITranscriber(apiKey: key, model: settings.openaiModel.rawValue)
         }
     }
 

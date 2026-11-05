@@ -232,6 +232,13 @@ struct Strings {
     let geminiGetKey: String
     let geminiSmartTitle: String
     let geminiSmartSubtitle: String
+    let openaiTitle: String
+    let openaiSubtitle: String
+    let openaiFooter: String
+    let openaiModelTranscribe: String
+    let openaiModelTranscribeHint: String
+    let openaiModelMini: String
+    let openaiModelMiniHint: String
 }
 
 extension Strings {
@@ -422,7 +429,14 @@ extension Strings {
         geminiFooter: "Ключ хранится на этом Маке и уходит только в Google",
         geminiGetKey: "Получить ключ",
         geminiSmartTitle: "Умная расшифровка",
-        geminiSmartSubtitle: "Убирает слова-паразиты и мат, расставляет пунктуацию. Выключите для дословного текста"
+        geminiSmartSubtitle: "Убирает слова-паразиты и мат, расставляет пунктуацию. Выключите для дословного текста",
+        openaiTitle: "OpenAI",
+        openaiSubtitle: "Запись уходит в OpenAI после отпускания клавиши. Нужен ключ OpenAI",
+        openaiFooter: "Ключ хранится на этом Маке и уходит только в OpenAI",
+        openaiModelTranscribe: "GPT Transcribe",
+        openaiModelTranscribeHint: "Точнее, около $0.005 за минуту",
+        openaiModelMini: "GPT-4o mini Transcribe",
+        openaiModelMiniHint: "Дешевле, около $0.003 за минуту. OpenAI отключит её 26 февраля 2027"
     )
 
     static let uz = Strings(
@@ -588,6 +602,13 @@ extension Strings {
         geminiFooter: "Kalit shu Makda saqlanadi va faqat Googlega yuboriladi",
         geminiGetKey: "Kalit olish",
         geminiSmartTitle: "Aqlli matn",
-        geminiSmartSubtitle: "Ortiqcha soʼzlar va soʼkinishni olib tashlaydi, tinish belgilarini qoʼyadi. Soʼzma-soʼz matn uchun oʼchiring"
+        geminiSmartSubtitle: "Ortiqcha soʼzlar va soʼkinishni olib tashlaydi, tinish belgilarini qoʼyadi. Soʼzma-soʼz matn uchun oʼchiring",
+        openaiTitle: "OpenAI",
+        openaiSubtitle: "Tugma qoʼyib yuborilgach, yozuv OpenAIga yuboriladi. OpenAI kaliti kerak",
+        openaiFooter: "Kalit shu Makda saqlanadi va faqat OpenAIga yuboriladi",
+        openaiModelTranscribe: "GPT Transcribe",
+        openaiModelTranscribeHint: "Aniqroq, daqiqasi taxminan $0.005",
+        openaiModelMini: "GPT-4o mini Transcribe",
+        openaiModelMiniHint: "Arzonroq, daqiqasi taxminan $0.003. OpenAI uni 2027-yil 26-fevralda oʼchiradi"
     )
 }

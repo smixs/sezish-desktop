@@ -293,6 +293,17 @@ final class AppState {
         rebuildCoordinator(warmup: false)
     }
 
+    func setOpenAIApiKey(_ key: String) {
+        settings.openaiApiKey = key
+        refreshModeMirrors()
+        rebuildCoordinator(warmup: false)
+    }
+
+    func setOpenAIModel(_ model: OpenAIModel) {
+        settings.openaiModel = model
+        rebuildCoordinator(warmup: false)
+    }
+
     func setGeminiSmartMode(_ on: Bool) {
         settings.geminiSmartMode = on
         rebuildCoordinator()

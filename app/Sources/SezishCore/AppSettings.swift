@@ -7,6 +7,14 @@ public enum TranscriptionMode: String, Sendable, CaseIterable {
     case cloud
     case local
     case gemini
+    case openai
+}
+
+/// The OpenAI speech-to-text model for `.openai` dictation.
+public enum OpenAIModel: String, Sendable, CaseIterable {
+    case transcribe = "gpt-transcribe"
+    /// OpenAI shuts it down on 2027-02-26: drop the case then.
+    case mini = "gpt-4o-mini-transcribe"
 }
 
 /// UI language. Absent in settings means "follow the system".
@@ -160,6 +168,7 @@ public final class AppSettings {
         case .local: return .local
         case .cloud: return fallback
         case .gemini: return geminiApiKey == nil ? fallback : .gemini
+        case .openai: return openaiApiKey == nil ? fallback : .openai
         }
     }
 
@@ -181,6 +190,29 @@ public final class AppSettings {
                 defaults.removeObject(forKey: Keys.geminiApiKey)
             }
         }
+    }
+
+    /// The user's own OpenAI key for `.openai`; trimmed, blank reads as absent.
+    public var openaiApiKey: String? {
+        get {
+            let trimmed = defaults.string(forKey: Keys.openaiApiKey)?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let trimmed, !trimmed.isEmpty else { return nil }
+            return trimmed
+        }
+        set {
+            let trimmed = newValue?.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let trimmed, !trimmed.isEmpty {
+                defaults.set(trimmed, forKey: Keys.openaiApiKey)
+            } else {
+                defaults.removeObject(forKey: Keys.openaiApiKey)
+            }
+        }
+    }
+
+    public var openaiModel: OpenAIModel {
+        get { defaults.string(forKey: Keys.openaiModel).flatMap(OpenAIModel.init(rawValue:)) ?? .transcribe }
+        set { defaults.set(newValue.rawValue, forKey: Keys.openaiModel) }
     }
 
     /// Gemini cleans up the transcript (filler words, profanity, punctuation).
@@ -305,6 +337,8 @@ public final class AppSettings {
         static let playSounds = "playSounds"
         static let soundVolume = "soundVolume"
         static let hudPlacement = "hudPlacement"
+        static let openaiApiKey = "openaiApiKey"
+        static let openaiModel = "openaiModel"
         static let waveIntensity = "waveIntensity"
         static let extraDenyApps = "extraDenyApps"
         static let meetingHook = "meetingHook"
