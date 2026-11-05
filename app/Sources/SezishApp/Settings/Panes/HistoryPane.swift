@@ -3,8 +3,9 @@ import SwiftUI
 import SezishCore
 
 /// Dictations, newest first, grouped by day, with a search over the text. Meetings
-/// have their own section now. A row copies on hover; a failed take keeps its
-/// reason and can be recognised again; any take with audio can be heard.
+/// have their own section now. Every row shows its actions at all times, so a
+/// hover never changes its size; a failed take keeps its reason and can be
+/// recognised again; any take with audio can be heard.
 struct HistoryPane: View {
     @Environment(AppState.self) private var appState
     @State private var query = ""
@@ -81,7 +82,6 @@ private struct DictationRow: View {
     let playing: Bool
     let divider: Bool
     let onPlay: () -> Void
-    @State private var hovering = false
     @State private var copied = false
 
     var body: some View {
@@ -111,8 +111,6 @@ private struct DictationRow: View {
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 9)
-            .contentShape(Rectangle())
-            .onHover { hovering = $0 }
             if divider { BrandDivider().padding(.leading, 62) }
         }
     }
@@ -123,7 +121,7 @@ private struct DictationRow: View {
                 icon(appState.retryingDictation == record.id ? nil : "arrow.clockwise",
                      help: appState.strings.retryTranscription) { appState.retranscribe(record) }
                     .disabled(appState.retryingDictation != nil || record.audioURL == nil)
-            } else if hovering || copied {
+            } else {
                 icon(copied ? "checkmark" : "doc.on.doc", help: copied ? strings.copied : strings.copy) {
                     let pasteboard = NSPasteboard.general
                     pasteboard.clearContents()
@@ -132,15 +130,14 @@ private struct DictationRow: View {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { copied = false }
                 }
             }
-            if hovering || playing, record.audioURL != nil {
+            if record.audioURL != nil {
                 icon(playing ? "stop.fill" : "play.fill", help: strings.listen, action: onPlay)
             }
-            if hovering {
-                icon("trash", help: appState.strings.delete) { appState.deleteDictation(record) }
-                    .disabled(appState.retryingDictation == record.id)
-            }
+            icon("trash", help: appState.strings.delete) { appState.deleteDictation(record) }
+                .disabled(appState.retryingDictation == record.id)
         }
-        .frame(minWidth: 60, alignment: .trailing)
+        // A fixed column, so every row lines its buttons up and the text never reflows.
+        .frame(width: 72, alignment: .trailing)
     }
 
     /// nil symbol draws a spinner in its place.
@@ -153,7 +150,8 @@ private struct DictationRow: View {
                     ProgressView().controlSize(.mini)
                 }
             }
-            .frame(width: 22, height: 22)
+            // No taller than a line of text, so the buttons never set the row's height.
+            .frame(width: 22, height: 18)
             .foregroundStyle(Brand.muted)
             .contentShape(Rectangle())
         }
