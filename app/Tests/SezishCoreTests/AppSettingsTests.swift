@@ -232,3 +232,30 @@ import Testing
         #expect(tuned.meetingMaxDurationAfter == 5 * 3_600)
     }
 }
+
+/// OpenAI runs on the user's own key; without one dictation falls back.
+struct OpenAISettingsTests {
+    private func settings() -> AppSettings {
+        AppSettings(defaults: UserDefaults(suiteName: "openai-\(UUID().uuidString)")!)
+    }
+
+    @Test func withoutAKeyTheModeFallsBack() {
+        let s = settings()
+        s.transcriptionMode = .openai
+        #expect(s.effectiveTranscriptionMode != .openai)
+        s.openaiApiKey = "  sk-1 \n"
+        #expect(s.openaiApiKey == "sk-1")
+        #expect(s.effectiveTranscriptionMode == .openai)
+        s.openaiApiKey = "   "
+        #expect(s.openaiApiKey == nil)
+    }
+
+    @Test func theModelDefaultsToGptTranscribe() {
+        let s = settings()
+        #expect(s.openaiModel == .transcribe)
+        #expect(OpenAIModel.transcribe.rawValue == "gpt-transcribe")
+        #expect(OpenAIModel.mini.rawValue == "gpt-4o-mini-transcribe")
+        s.openaiModel = .mini
+        #expect(s.openaiModel == .mini)
+    }
+}
