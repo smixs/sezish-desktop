@@ -236,6 +236,20 @@ private struct MenuContent: View {
 
             SettingsLink {
                 Label {
+                    Text(SettingsStrings.forLanguage(appState.language).meetingsItem)
+                        .foregroundStyle(Brand.text)
+                } icon: {
+                    Image(systemName: "person.2").foregroundStyle(Brand.muted)
+                }
+            }
+            .buttonStyle(BrandRowButtonStyle())
+            .simultaneousGesture(TapGesture().onEnded {
+                appState.settingsPane = .meetings
+                NSApp.activate(ignoringOtherApps: true)
+            })
+
+            SettingsLink {
+                Label {
                     Text(appState.strings.settingsItem).foregroundStyle(Brand.text)
                 } icon: {
                     Image(systemName: "gearshape").foregroundStyle(Brand.muted)
@@ -244,6 +258,7 @@ private struct MenuContent: View {
             .buttonStyle(BrandRowButtonStyle())
             .keyboardShortcut(",", modifiers: .command)
             .simultaneousGesture(TapGesture().onEnded {
+                appState.settingsPane = .general
                 NSApp.activate(ignoringOtherApps: true)
             })
 

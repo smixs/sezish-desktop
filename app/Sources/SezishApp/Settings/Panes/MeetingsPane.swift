@@ -197,19 +197,25 @@ private struct MeetingCard: View {
     @State private var document: MeetingDocument?
     @State private var summary: (lead: String, url: URL)?
     @State private var copied = false
+    @State private var editing: String?
+    @FocusState private var titleFocused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(document?.title ?? appState.strings.meetingDocTitle)
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(Brand.text)
-                        .textSelection(.enabled)
+                    if let draft = editing {
+                        renameField(draft)
+                    } else {
+                        Text(document?.title ?? appState.strings.meetingDocTitle)
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(Brand.text)
+                            .textSelection(.enabled)
+                    }
                     Text(meta).font(.system(size: 11)).foregroundStyle(Brand.muted)
                 }
                 Spacer(minLength: 8)
-                toolbar
+                if editing == nil { toolbar }
             }
             .padding(16)
             BrandDivider()
@@ -243,6 +249,12 @@ private struct MeetingCard: View {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { copied = false }
             }
             .disabled(document?.lines.isEmpty ?? true)
+            tool("pencil", help: strings.rename) {
+                editing = document?.title ?? ""
+                titleFocused = true
+            }
+            // The app writes this file itself while it recognises the take again.
+            .disabled(document?.heading == nil || appState.retryingMeeting != nil)
             tool("folder", help: strings.showInFinder) {
                 let audio = document?.audioFile.map { entry.mdURL.deletingLastPathComponent().appendingPathComponent($0) }
                 let target = entry.hasMarkdown ? entry.mdURL : audio ?? entry.mdURL.deletingLastPathComponent()
@@ -260,6 +272,37 @@ private struct MeetingCard: View {
                     appState.retrySummary(meetingMd: entry.mdURL)
                 }
             }
+        }
+    }
+
+    private func renameField(_ draft: String) -> some View {
+        HStack(spacing: 6) {
+            TextField("", text: Binding(get: { editing ?? "" }, set: { editing = $0 }))
+                .textFieldStyle(.roundedBorder)
+                .font(.system(size: 13))
+                .focused($titleFocused)
+                .onSubmit(saveTitle)
+                .onExitCommand { editing = nil }
+            Button(strings.save, action: saveTitle)
+                .buttonStyle(BrandPrimaryButtonStyle(compact: true))
+                .disabled(draft.trimmingCharacters(in: .whitespaces).isEmpty)
+            Button(strings.cancel) { editing = nil }
+                .buttonStyle(BrandSecondaryButtonStyle())
+        }
+    }
+
+    /// One atomic write of the heading; the file names and the vault links stay.
+    private func saveTitle() {
+        guard let draft = editing,
+              let text = try? String(contentsOf: entry.mdURL, encoding: .utf8),
+              let renamed = MeetingDocument.renamed(text, to: draft) else { return }
+        do {
+            try renamed.write(to: entry.mdURL, atomically: true, encoding: .utf8)
+            editing = nil
+            appState.refreshMeetings() // the list re-reads the heading
+            Task { await load() }
+        } catch {
+            NSSound.beep()
         }
     }
 

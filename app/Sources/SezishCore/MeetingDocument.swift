@@ -61,6 +61,22 @@ public struct MeetingDocument: Sendable {
         self.lines = lines
     }
 
+    /// The same file with a new title in its heading; the " - <date>" stamp and
+    /// every other byte stay. nil for a blank title or a file without a heading.
+    /// One atomic write of this text renames the meeting: file names stay, so the
+    /// audio link and the summary card in the vault keep pointing at it.
+    public static func renamed(_ markdown: String, to newTitle: String) -> String? {
+        let title = newTitle.split(whereSeparator: \.isNewline).joined(separator: " ")
+            .trimmingCharacters(in: .whitespaces)
+        guard !title.isEmpty,
+              let start = markdown.range(of: "# "),
+              markdown[..<start.lowerBound].allSatisfy(\.isWhitespace) else { return nil }
+        let lineEnd = markdown[start.upperBound...].firstIndex(of: "\n") ?? markdown.endIndex
+        let heading = markdown[start.upperBound..<lineEnd]
+        let stamp = heading.range(of: " - ", options: .backwards).map { heading[$0.lowerBound...] } ?? ""
+        return markdown[..<start.upperBound] + title + stamp + markdown[lineEnd...]
+    }
+
     /// The transcript as text, one line per reply, for copying.
     public var plainTranscript: String {
         lines.map { line in

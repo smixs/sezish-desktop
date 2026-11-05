@@ -160,6 +160,8 @@ final class AppState {
     /// Turns the monitor's raw press/release edges into start/stop per the current mode.
     @ObservationIgnored private var hotkeyInterpreter: HotkeyModeInterpreter?
     @ObservationIgnored private var permissionPoll: Timer?
+    /// The settings window's section, here so the menu's «Встречи…» can open it there.
+    var settingsPane: SettingsPane = .general
     /// The first-run tour; fed by the permission poll while it is open.
     @ObservationIgnored let onboardingWindow = OnboardingWindow()
 

@@ -8,7 +8,6 @@ import SezishCore
 struct SettingsRootView: View {
     @Environment(AppState.self) private var appState
     @EnvironmentObject private var updater: UpdaterModel
-    @State private var selection: SettingsPane = .general
 
     private var appVersion: String {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
@@ -41,8 +40,8 @@ struct SettingsRootView: View {
     /// not blank the detail column, so nil is simply ignored.
     private var selectionBinding: Binding<SettingsPane?> {
         Binding(
-            get: { selection },
-            set: { if let new = $0 { selection = new } }
+            get: { appState.settingsPane },
+            set: { if let new = $0 { appState.settingsPane = new } }
         )
     }
 
@@ -79,7 +78,7 @@ struct SettingsRootView: View {
     }
 
     @ViewBuilder private var detail: some View {
-        switch selection {
+        switch appState.settingsPane {
         case .general: GeneralPane()
         case .history: HistoryPane()
         case .meetings: MeetingsPane()
