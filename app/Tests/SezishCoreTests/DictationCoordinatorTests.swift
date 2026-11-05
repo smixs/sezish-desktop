@@ -159,8 +159,14 @@ private func tmpHistory() throws -> (DictationHistory, URL) {
     return (try DictationHistory(directory: dir), dir)
 }
 
+/// A 220 Hz tone at -23 dBFS: loud enough for the silence gate. A constant
+/// level is DC, which the gate rightly reads as no sound at all.
+private func voiced(_ count: Int) -> [Float] {
+    (0..<count).map { 0.1 * sin(2 * .pi * 220 * Float($0) / 16_000) }
+}
+
 /// A recording long enough to clear the 0.3 s minimum (0.5 s @ 16 kHz).
-private let longEnough = [Float](repeating: 0.1, count: 8_000)
+private let longEnough = voiced(8_000)
 
 @Suite @MainActor struct DictationCoordinatorTests {
     @Test func happyPathRecordsTranscribesInsertsAndStores() async throws {
@@ -285,7 +291,7 @@ private let longEnough = [Float](repeating: 0.1, count: 8_000)
         let (history, dir) = try tmpHistory()
         defer { try? FileManager.default.removeItem(at: dir) }
         // One sample under 0.3 s — a stray tap of the push-to-talk key.
-        let mic = MockMic(samples: [Float](repeating: 0.1, count: DictationCoordinator.minimumSamples - 1))
+        let mic = MockMic(samples: voiced(DictationCoordinator.minimumSamples - 1))
         let transcriber = MockTranscriber(.success("готово"))
         let inserter = MockInserter()
         let coord = DictationCoordinator(
@@ -301,11 +307,36 @@ private let longEnough = [Float](repeating: 0.1, count: 8_000)
         #expect(history.records.isEmpty)      // never stored
     }
 
+    @Test func aSilentTakeIsDroppedQuietly() async throws {
+        let (history, dir) = try tmpHistory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        // Two seconds of a quiet room: noise at about -60 dBFS.
+        var seed: UInt32 = 7
+        let room = (0..<32_000).map { _ -> Float in
+            seed = seed &* 1_664_525 &+ 1_013_904_223
+            return (Float(seed >> 8) / Float(1 << 24) - 0.5) * 0.002
+        }
+        let mic = MockMic(samples: room)
+        let transcriber = MockTranscriber(.success("Спасибо."))
+        let inserter = MockInserter()
+        let coord = DictationCoordinator(
+            mic: mic, transcriber: transcriber, engine: "cloud", inserter: inserter, history: history)
+
+        coord.begin()
+        let outcome = await coord.end()
+
+        #expect(outcome == .ignored)
+        #expect(coord.state == .idle)
+        #expect(transcriber.callCount == 0)
+        #expect(inserter.inserted.isEmpty)
+        #expect(history.records.isEmpty)
+    }
+
     @Test func recordingAtMinimumIsKept() async throws {
         let (history, dir) = try tmpHistory()
         defer { try? FileManager.default.removeItem(at: dir) }
         // Exactly 0.3 s — the boundary must be transcribed.
-        let mic = MockMic(samples: [Float](repeating: 0.1, count: DictationCoordinator.minimumSamples))
+        let mic = MockMic(samples: voiced(DictationCoordinator.minimumSamples))
         let transcriber = MockTranscriber(.success("ok"))
         let inserter = MockInserter()
         let coord = DictationCoordinator(
@@ -733,7 +764,7 @@ private let longEnough = [Float](repeating: 0.1, count: 8_000)
     @Test func shortStreamingClipCancelsTheSession() async throws {
         let (history, dir) = try tmpHistory()
         defer { try? FileManager.default.removeItem(at: dir) }
-        let mic = MockMic(samples: [Float](repeating: 0.1, count: DictationCoordinator.minimumSamples - 1))
+        let mic = MockMic(samples: voiced(DictationCoordinator.minimumSamples - 1))
         let transcriber = MockStreamingTranscriber(.success("поток"))
         let coord = DictationCoordinator(
             mic: mic, transcriber: transcriber, engine: "gemini",
