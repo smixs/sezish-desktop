@@ -9,3 +9,4 @@ __pycache__/
 workbench.md
 .scratch/
 .worktrees/
+specs/tla/states/
