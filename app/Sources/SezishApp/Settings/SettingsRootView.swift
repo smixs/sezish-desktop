@@ -16,11 +16,13 @@ struct SettingsRootView: View {
     var body: some View {
         NavigationSplitView {
             List(SettingsPane.allCases, selection: selectionBinding) { pane in
-                Label {
-                    Text(pane.title(appState.strings))
-                } icon: {
+                // An explicit row, not a Label: the sidebar sizes a Label's icon slot
+                // for a 16 pt glyph, and the 24 pt tile spilled over the title.
+                HStack(spacing: 9) {
                     PaneTile(pane: pane)
+                    Text(pane.title(appState.strings))
                 }
+                .padding(.vertical, 2)
             }
             .listStyle(.sidebar)
             .toolbar(removing: .sidebarToggle)
