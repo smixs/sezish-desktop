@@ -199,6 +199,12 @@ public final class AppSettings {
     }
 
     /// Start-of-recording chimes (dictation and meeting). Default on.
+    /// Dictation wave strength; unknown or absent values fall back to lively.
+    public var waveIntensity: WaveIntensity {
+        get { defaults.string(forKey: Keys.waveIntensity).flatMap(WaveIntensity.init(rawValue:)) ?? .lively }
+        set { defaults.set(newValue.rawValue, forKey: Keys.waveIntensity) }
+    }
+
     public var playSounds: Bool {
         get { defaults.object(forKey: Keys.playSounds) as? Bool ?? true }
         set { defaults.set(newValue, forKey: Keys.playSounds) }
@@ -285,6 +291,7 @@ public final class AppSettings {
         static let launchHidden = "launchHidden"
         static let appLanguage = "appLanguage"
         static let playSounds = "playSounds"
+        static let waveIntensity = "waveIntensity"
         static let extraDenyApps = "extraDenyApps"
         static let meetingHook = "meetingHook"
         static let meetingSilenceStopMinutes = "meetingSilenceStopMinutes"

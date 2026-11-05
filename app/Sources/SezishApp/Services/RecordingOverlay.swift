@@ -138,9 +138,9 @@ private struct OverlayHUD: View {
             .frame(width: 22, height: 28)
             .frame(width: RecordingOverlay.hudDiameter, height: RecordingOverlay.hudDiameter)
             .background(Brand.hudBg, in: Circle())
+            // No drop shadow (Serge, 2026-11-05): the metal rim alone separates
+            // the HUD from whatever is under it.
             .overlay(MetalRimView(isActive: isActive))
-            // Neutral elevation shadow — the HUD floats above other apps; no neon.
-            .shadow(color: .black.opacity(0.32), radius: 12, y: 5)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .environment(\.colorScheme, .dark) // HUD is brand-dark, never follows the system
     }

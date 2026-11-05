@@ -179,6 +179,7 @@ final class AppState {
 
         autoRecordMeetings = settings.autoRecordMeetings
         soundsEnabled = settings.playSounds
+        levelMeter.intensity = settings.waveIntensity
         notifier.onSummaryRetry = { [weak self] md in self?.retrySummary(meetingMd: md) }
         // Only while this session's capture is broken: a restart banner left in
         // Notification Center by an earlier session must not kill a live recording.
@@ -204,6 +205,11 @@ final class AppState {
         )
         installShortcutMonitor()
         startPermissionPoll()
+    }
+
+    func setWaveIntensity(_ intensity: WaveIntensity) {
+        levelMeter.intensity = intensity
+        settings.waveIntensity = intensity
     }
 
     func setSoundsEnabled(_ enabled: Bool) {

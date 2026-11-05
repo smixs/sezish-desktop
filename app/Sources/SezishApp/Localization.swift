@@ -53,6 +53,10 @@ struct Strings {
     let launchHiddenToggle: String
     let launchHiddenHint: String
     let soundsToggle: String
+    let waveIntensity: String
+    let waveCalm: String
+    let waveLively: String
+    let waveBold: String
 
     // Settings: notes folder
     let notesFolder: String
@@ -282,6 +286,10 @@ extension Strings {
         launchHiddenToggle: "Запускать свёрнутым",
         launchHiddenHint: "Окно настроек не откроется при запуске. Приложение остаётся в строке меню",
         soundsToggle: "Звуки",
+        waveIntensity: "Волна при диктовке",
+        waveCalm: "Спокойно",
+        waveLively: "Живее",
+        waveBold: "Дерзко",
         notesFolder: "Папка заметок",
         notSelected: "Не выбрана",
         choose: "Выбрать…",
@@ -434,6 +442,10 @@ extension Strings {
         launchHiddenToggle: "Oynasiz ishga tushirish",
         launchHiddenHint: "Ishga tushganda sozlamalar oynasi ochilmaydi. Ilova menyu satrida qoladi",
         soundsToggle: "Tovushlar",
+        waveIntensity: "Diktovkadagi toʼlqin",
+        waveCalm: "Sokin",
+        waveLively: "Jonli",
+        waveBold: "Shiddatli",
         notesFolder: "Qaydlar papkasi",
         notSelected: "Tanlanmagan",
         choose: "Tanlash…",

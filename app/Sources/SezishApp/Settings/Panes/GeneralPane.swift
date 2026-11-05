@@ -41,6 +41,12 @@ struct GeneralPane: View {
                     .onChange(of: playSounds) { _, value in
                         appState.setSoundsEnabled(value)
                     }
+                Picker(appState.strings.waveIntensity, selection: waveBinding) {
+                    Text(appState.strings.waveCalm).tag(WaveIntensity.calm)
+                    Text(appState.strings.waveLively).tag(WaveIntensity.lively)
+                    Text(appState.strings.waveBold).tag(WaveIntensity.bold)
+                }
+                .pickerStyle(.segmented)
             } footer: {
                 Text(appState.strings.launchHiddenHint)
                     .font(.system(size: 11))
@@ -64,6 +70,11 @@ struct GeneralPane: View {
         .formStyle(.grouped)
         .navigationTitle(SettingsPane.general.title(appState.strings))
         .onAppear(perform: syncFromStorage)
+    }
+
+    /// Applies live: the next frame of a running dictation already uses it.
+    private var waveBinding: Binding<WaveIntensity> {
+        Binding(get: { appState.levelMeter.intensity }, set: { appState.setWaveIntensity($0) })
     }
 
     private var languageBinding: Binding<AppLanguage> {
