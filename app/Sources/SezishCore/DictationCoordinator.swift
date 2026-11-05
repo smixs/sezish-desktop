@@ -13,7 +13,7 @@ public final class DictationCoordinator {
 
     /// What one `end()` produced, so the caller can give the user feedback.
     public enum Outcome: Sendable, Equatable {
-        /// Nothing to do: not recording, or the clip was too short to be speech.
+        /// Nothing to do: not recording, or the clip was too short or too quiet to be speech.
         case ignored
         /// Transcribed, stored to history, and inserted at the cursor.
         case inserted
@@ -124,6 +124,12 @@ public final class DictationCoordinator {
         guard samples.count >= Self.minimumSamples else {
             streamStart = nil
             await streaming?.cancelStream() // too short to be speech — drop it, do not flush
+            return .ignored
+        }
+        // No speech in it: dropped quietly, as hex does — nothing typed, nothing stored.
+        guard !SilenceGate.isNearSilent(samples) else {
+            streamStart = nil
+            await streaming?.cancelStream()
             return .ignored
         }
         let text: String
