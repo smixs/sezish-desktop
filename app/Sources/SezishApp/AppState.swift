@@ -214,6 +214,7 @@ final class AppState {
         )
         installShortcutMonitor()
         startPermissionPoll()
+        nameSummarizedMeetings()
     }
 
     func setWaveIntensity(_ intensity: WaveIntensity) {

@@ -342,6 +342,7 @@ extension AppState {
         )
         await MainActor.run {
             input.state.releaseSummary(md)
+            if outcome == .done { input.state.nameMeetingFromSummary(md, notesFolder: input.notesFolder) }
             guard let body = Self.summaryNotification(outcome, strings: input.strings) else {
                 return
             }
@@ -350,6 +351,50 @@ extension AppState {
                 retry: Self.summaryOffersRetry(outcome)
                     ? (meeting: md, actionTitle: input.strings.notifSummaryRetryAction) : nil)
         }
+    }
+
+    /// The names the app gives a new meeting, in both UI languages.
+    static var automaticMeetingNames: MeetingTitle.AutoNames {
+        .init(plain: [Strings.ru.meetingDocTitle, Strings.uz.meetingDocTitle],
+              withApp: [Strings.ru.meetingDocTitleApp, Strings.uz.meetingDocTitleApp])
+    }
+
+    /// The meeting takes its summary card's title unless the user already named it
+    /// (specs/tla/MeetingTitle.tla). Read and write happen here, on the main actor,
+    /// against the file as it is now, so a rename from the meetings screen can
+    /// never be overwritten. The vault's transcript copy follows the new name.
+    func nameMeetingFromSummary(_ md: URL, notesFolder: URL, refresh: Bool = true) {
+        let base = md.deletingPathExtension().lastPathComponent
+        let card = notesFolder
+            .appendingPathComponent("\(SummaryVault.subdirectory)/\(SummaryVault.meetingsDir)")
+            .appendingPathComponent(base + ".md")
+        guard let cardText = try? String(contentsOf: card, encoding: .utf8),
+              let text = try? String(contentsOf: md, encoding: .utf8),
+              let named = MeetingTitle.fromSummary(text, card: cardText, names: Self.automaticMeetingNames)
+        else { return }
+        let modified = (try? FileManager.default.attributesOfItem(atPath: md.path))?[.modificationDate] as? Date
+        let copy = notesFolder.appendingPathComponent(
+            SummaryTranscriptCopy.relativePath(baseName: base, fallbackDate: modified ?? Date()))
+        do {
+            try named.write(to: md, atomically: true, encoding: .utf8)
+        } catch {
+            meetingStopLog.error("meeting rename after summary failed: \(error.localizedDescription, privacy: .public)")
+            return
+        }
+        if FileManager.default.fileExists(atPath: copy.path) {
+            try? Data(SummaryMarker.stripped(from: named).utf8).write(to: copy, options: .atomic)
+        }
+        if refresh { refreshMeetings() }
+    }
+
+    /// Meetings summarized before names came from summaries keep "Запись звонка";
+    /// at launch each one with a card takes the card's title, by the same rule.
+    func nameSummarizedMeetings() {
+        guard let notesFolder = Self.vaultURL(settings.notesFolder) else { return }
+        for entry in MeetingLibrary.entries(in: MeetingRecorder.meetingsDirectory) {
+            nameMeetingFromSummary(entry.mdURL, notesFolder: notesFolder, refresh: false)
+        }
+        refreshMeetings()
     }
 
     func claimSummary(_ md: URL) -> Bool { summaryGate.begin(md) }

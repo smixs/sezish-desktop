@@ -143,7 +143,7 @@ public enum SummaryLead {
     }
 
     /// "[[a|b]]" → "b", "[[path/name]]" → "name".
-    private static func unwrapLinks(_ text: String) -> String {
+    static func unwrapLinks(_ text: String) -> String {
         var out = ""
         var rest = text[...]
         while let open = rest.range(of: "[["), let close = rest[open.upperBound...].range(of: "]]") {
@@ -157,6 +157,58 @@ public enum SummaryLead {
             rest = rest[close.upperBound...]
         }
         return out + rest
+    }
+}
+
+/// The summary card's "# Title", past the frontmatter, links shown by their label.
+public enum SummaryCard {
+    public static func title(of card: String) -> String? {
+        var lines = card.components(separatedBy: "\n")[...]
+        if lines.first?.trimmingCharacters(in: .whitespaces) == "---" {
+            lines = lines.dropFirst()
+            if let end = lines.firstIndex(where: { $0.trimmingCharacters(in: .whitespaces) == "---" }) {
+                lines = lines[(end + 1)...]
+            }
+        }
+        guard let heading = lines.first(where: { $0.hasPrefix("# ") }) else { return nil }
+        let title = SummaryLead.unwrapLinks(String(heading.dropFirst(2))).trimmingCharacters(in: .whitespaces)
+        return title.isEmpty ? nil : title
+    }
+}
+
+/// The meeting's name after its summary (hex-polish п.39, specs/tla/MeetingTitle.tla).
+public enum MeetingTitle {
+    /// The names the app gives a new meeting, in every UI language: plain ones and
+    /// ones with "%@" for the call app.
+    public struct AutoNames: Sendable {
+        public let plain: [String]
+        public let withApp: [String]
+
+        public init(plain: [String], withApp: [String]) {
+            self.plain = plain
+            self.withApp = withApp
+        }
+
+        public func isAutomatic(_ title: String) -> Bool {
+            if plain.contains(title) { return true }
+            return withApp.contains { pattern in
+                let parts = pattern.components(separatedBy: "%@")
+                guard parts.count == 2 else { return false }
+                return title.hasPrefix(parts[0]) && title.hasSuffix(parts[1])
+                    && title.count > parts[0].count + parts[1].count
+            }
+        }
+    }
+
+    /// The meeting file with the card's title, or nil when it keeps its name: the
+    /// user named it, or the card has no title. `markdown` must be read from disk
+    /// right before the write — the check is against the file now, not a snapshot
+    /// from when the summary started (the model's FreshRead).
+    public static func fromSummary(_ markdown: String, card: String, names: AutoNames) -> String? {
+        guard let current = MeetingDocument(markdown: markdown, speakers: []).title,
+              names.isAutomatic(current),
+              let title = SummaryCard.title(of: card) else { return nil }
+        return MeetingDocument.renamed(markdown, to: title)
     }
 }
 
