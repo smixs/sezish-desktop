@@ -16,6 +16,7 @@ struct SezishApp: App {
             // The label is alive from launch, so it doubles as the "open Settings
             // on manual launch / on reopen" hook (the menu content is not).
             MenuBarLabel(isRecording: appState.isRecordingMeeting,
+                         hotkeyBlocked: appState.secureInputHolder != nil,
                          launchedAsLoginItem: delegate.launchedAsLoginItem,
                          launchHidden: appState.settings.launchHidden,
                          appState: appState)
@@ -32,6 +33,8 @@ struct SezishApp: App {
 
 private struct MenuBarLabel: View {
     let isRecording: Bool
+    /// Secure Input holds the keyboard: the glyph gets a dot.
+    let hotkeyBlocked: Bool
     let launchedAsLoginItem: Bool
     /// The user's "start hidden" switch, read once at launch.
     let launchHidden: Bool
@@ -55,12 +58,31 @@ private struct MenuBarLabel: View {
             }
     }
 
+    /// The glyph with a dot in its top-right corner, cut out of the glyph so it
+    /// reads on any menu bar. Still a template: the system tints both.
+    private static func badged(_ glyph: NSImage) -> NSImage {
+        let size = glyph.size
+        let image = NSImage(size: size, flipped: false) { rect in
+            glyph.draw(in: rect)
+            let d = size.height * 0.32
+            let dot = NSRect(x: rect.maxX - d, y: rect.maxY - d, width: d, height: d)
+            NSGraphicsContext.current?.compositingOperation = .clear
+            NSBezierPath(ovalIn: dot.insetBy(dx: -1.2, dy: -1.2)).fill()
+            NSGraphicsContext.current?.compositingOperation = .sourceOver
+            NSColor.black.setFill()
+            NSBezierPath(ovalIn: dot).fill()
+            return true
+        }
+        image.isTemplate = true
+        return image
+    }
+
     @ViewBuilder private var icon: some View {
         if isRecording {
             Image(systemName: "waveform.circle.fill")
         } else if let brand = moduleResources.image(forResource: "MenuBarIcon") {
             // Template glyph (brand S-wave): black+alpha, system tints it per menu bar theme.
-            Image(nsImage: { brand.isTemplate = true; return brand }())
+            Image(nsImage: hotkeyBlocked ? Self.badged(brand) : { brand.isTemplate = true; return brand }())
         } else {
             Image(systemName: "waveform")
         }
@@ -76,6 +98,18 @@ private struct MenuContent: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
+            if let line = appState.secureInputLine {
+                Label {
+                    Text(line).foregroundStyle(Brand.text).lineLimit(2)
+                } icon: {
+                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.yellow)
+                }
+                .font(.system(size: 12))
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .help(appState.strings.secureInputHelp)
+                BrandDivider().padding(.vertical, 4)
+            }
             Button {
                 appState.toggleMeetingRecording()
             } label: {

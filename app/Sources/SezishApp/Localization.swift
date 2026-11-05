@@ -173,8 +173,16 @@ struct Strings {
     // Notifications
     let notifModelMissing: String
     let notifRecordFailed: String
-    let notifNoText: String
-    let notifDictationFailed: String
+    /// Pills on the dictation HUD (`HUDNotice`), a few words each.
+    let hudPasteManually: String
+    let hudNoText: String
+    let hudMicFailed: String
+    let hudModelMissing: String
+    /// Secure Input: "%@" is the app holding it.
+    let secureInputBy: String
+    let secureInputUnknown: String
+    let secureInputFix: String
+    let secureInputHelp: String
     let notifModelDownloadFailed: String
     let modelLoadErrorPrefix: String
     let downloadIncomplete: String
@@ -370,8 +378,14 @@ extension Strings {
         meetingStatusFading: "Тихо уже %d с",
         notifModelMissing: "Модель ещё не скачана. Откройте меню sezish и нажмите «Скачать модель».",
         notifRecordFailed: "Не удалось начать запись. Проверьте доступ к микрофону.",
-        notifNoText: "Текст не распознался. Аудио сохранено, распознать заново можно из меню sezish.",
-        notifDictationFailed: "Запись не получилась. Проверьте доступ к микрофону в Настройках.",
+        hudPasteManually: "Текст в буфере — вставьте ⌘V",
+        hudNoText: "Не расслышал — запись в истории",
+        hudMicFailed: "Микрофон не записал — открыть настройки",
+        hudModelMissing: "Модель не скачана — открыть настройки",
+        secureInputBy: "Клавишу блокирует %@",
+        secureInputUnknown: "Клавишу блокирует защищённый ввод",
+        secureInputFix: "Как исправить",
+        secureInputHelp: "Пока открыто поле пароля или в Терминале включён «Защищённый ввод с клавиатуры», macOS прячет клавиши от всех приложений. Закройте поле или снимите этот пункт в меню Терминала — клавиша заработает сразу.",
         notifModelDownloadFailed: "Не удалось скачать модель. Попробуйте ещё раз.",
         modelLoadErrorPrefix: "Не удалось загрузить модель: ",
         downloadIncomplete: "Загрузка не завершена",
@@ -526,8 +540,14 @@ extension Strings {
         meetingStatusFading: "%d sdan beri jimlik",
         notifModelMissing: "Model hali yuklab olinmagan. sezish menyusida «Modelni yuklab olish»ni bosing.",
         notifRecordFailed: "Yozishni boshlab boʼlmadi. Mikrofon ruxsatini tekshiring.",
-        notifNoText: "Matn aniqlanmadi. Audio saqlandi, sezish menyusidan qayta aniqlash mumkin.",
-        notifDictationFailed: "Yozish amalga oshmadi. Sozlamalarda mikrofon ruxsatini tekshiring.",
+        hudPasteManually: "Matn buferda — ⌘V bilan qoʼying",
+        hudNoText: "Eshitilmadi — yozuv tarixda",
+        hudMicFailed: "Mikrofon yozmadi — sozlamalarni ochish",
+        hudModelMissing: "Model yuklanmagan — sozlamalarni ochish",
+        secureInputBy: "Tugmani %@ toʼsmoqda",
+        secureInputUnknown: "Tugmani himoyalangan kiritish toʼsmoqda",
+        secureInputFix: "Qanday tuzatish",
+        secureInputHelp: "Parol maydoni ochiq turganda yoki Terminalda «Klaviaturadan xavfsiz kiritish» yoqilganda macOS tugmalarni barcha ilovalardan yashiradi. Maydonni yoping yoki Terminal menyusida bu bandni oʼchiring — tugma darhol ishlaydi.",
         notifModelDownloadFailed: "Modelni yuklab boʼlmadi. Yana urinib koʼring.",
         modelLoadErrorPrefix: "Modelni yuklashda xato: ",
         downloadIncomplete: "Yuklash tugallanmadi",

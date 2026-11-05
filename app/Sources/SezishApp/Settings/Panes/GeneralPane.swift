@@ -14,6 +14,7 @@ struct GeneralPane: View {
     @State private var soundVolume = 0.5
     @State private var launchAtLogin = false
     @State private var showAdvanced = false
+    @State private var showSecureInputFix = false
 
     private var s: SettingsStrings { .forLanguage(appState.language) }
     private var permissionsMissing: Bool {
@@ -25,6 +26,7 @@ struct GeneralPane: View {
             VStack(alignment: .leading, spacing: 14) {
                 SettingsPageTitle(title: appState.strings.general)
                 if permissionsMissing { permissions }
+                if let line = appState.secureInputLine { secureInput(line) }
                 mainCard
                 advancedToggle
                 if showAdvanced { advancedCard.transition(.opacity) }
@@ -32,9 +34,30 @@ struct GeneralPane: View {
             .padding(20)
             .animation(reduceMotion ? nil : .brandExpoOutFast, value: showAdvanced)
             .animation(.brandExpoOutFast, value: permissionsMissing)
+            .animation(.brandExpoOutFast, value: appState.secureInputHolder)
         }
         .background(Brand.bg)
         .onAppear(perform: syncFromStorage)
+    }
+
+    // MARK: - Secure Input
+
+    /// The hotkey is dead while another app holds Secure Input; the fix is in that app.
+    private func secureInput(_ line: String) -> some View {
+        SettingsCard {
+            SettingsRow(icon: "lock.fill", title: line, divider: false) {
+                Button(appState.strings.secureInputFix) { showSecureInputFix.toggle() }
+                    .buttonStyle(BrandSecondaryButtonStyle())
+                    .popover(isPresented: $showSecureInputFix, arrowEdge: .bottom) {
+                        Text(appState.strings.secureInputHelp)
+                            .font(.system(size: 12))
+                            .foregroundStyle(Brand.text)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(width: 280)
+                            .padding(14)
+                    }
+            }
+        }
     }
 
     // MARK: - Permissions

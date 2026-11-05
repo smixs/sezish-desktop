@@ -118,6 +118,9 @@ final class AppState {
     /// Set when Accessibility is granted but the event tap still refuses to install — the only
     /// known cure is a relaunch (the OS hasn't propagated the new TCC grant to this process).
     var needsRestart = false
+    /// Who holds Secure Input (the hotkey is dead meanwhile): nil when nobody,
+    /// "" when macOS does not say. Read by the 1 s permission poll.
+    var secureInputHolder: String?
 
     // `internal` (not `private`) so the model extension in a sibling file can reach them;
     // the app is a single-module executable, so this stays module-private in practice.
@@ -227,6 +230,12 @@ final class AppState {
         settings.soundVolume = volume
         sounds.volume = Float(settings.soundVolume)
         if soundsEnabled { sounds.play(.start) }
+    }
+
+    /// "Клавишу блокирует Терминал" for the menu and General.
+    var secureInputLine: String? {
+        guard let holder = secureInputHolder else { return nil }
+        return holder.isEmpty ? strings.secureInputUnknown : String(format: strings.secureInputBy, holder)
     }
 
     func playSound(_ event: SoundEvent) {
@@ -395,6 +404,8 @@ final class AppState {
 
         let micAuthorized = AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
         if micAuthorized != microphoneAuthorized { microphoneAuthorized = micAuthorized }
+        let holder = SecureInputProbe.holder()
+        if holder != secureInputHolder { secureInputHolder = holder }
         onboardingWindow.controller?.tick()
     }
 
@@ -435,7 +446,7 @@ final class AppState {
         // Only reachable in local mode without a downloaded model: cloud mode builds
         // its coordinator unconditionally when credentials exist.
         guard let coordinator else {
-            notifier.notify(title: "sezish", body: strings.notifModelMissing)
+            showNotice(.modelMissing)
             return
         }
         coordinator.begin()
@@ -444,8 +455,25 @@ final class AppState {
             overlay.show(meter: levelMeter)
             playSound(.start)
         } else {
-            notifier.notify(title: "sezish", body: strings.notifRecordFailed)
+            showNotice(.micFailed)
         }
+    }
+
+    /// A take that went wrong: the error sound and a pill on the HUD. The fixable
+    /// ones open Settings on click; General shows the permissions on top.
+    private func showNotice(_ notice: HUDNotice) {
+        playSound(.error)
+        let text = switch notice {
+        case .pasteManually: strings.hudPasteManually
+        case .noText: strings.hudNoText
+        case .micFailed: strings.hudMicFailed
+        case .modelMissing: strings.hudModelMissing
+        }
+        overlay.showNotice(text, duration: notice.duration, meter: levelMeter,
+                           onClick: notice.opensSettings ? { [weak self] in
+                               self?.settingsPane = .general
+                               NotificationCenter.default.post(name: .sezishShowSettings, object: nil)
+                           } : nil)
     }
 
     private func stopDictation() {
@@ -460,18 +488,12 @@ final class AppState {
         playSound(.stop)
         Task {
             let outcome = await coordinator.end()
-            self.overlay.hide()
-            if let ending = SoundEvent.after(outcome) { self.playSound(ending) }
             self.refreshDictations()
-            switch outcome {
-            case .insertFailed(let message):
-                notifier.notify(title: "sezish", body: message)
-            case .noText:
-                notifier.notify(title: "sezish", body: strings.notifNoText)
-            case .failed:
-                notifier.notify(title: "sezish", body: strings.notifDictationFailed)
-            case .ignored, .inserted:
-                break
+            if let notice = HUDNotice.after(outcome) {
+                self.showNotice(notice) // plays the error sound itself
+            } else {
+                self.overlay.hide()
+                if let ending = SoundEvent.after(outcome) { self.playSound(ending) }
             }
         }
     }
