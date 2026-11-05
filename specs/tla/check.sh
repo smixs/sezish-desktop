@@ -1,5 +1,5 @@
 #!/bin/sh
-# Конфиги моделей (Onboarding, MeetingTitle) под TLC с ожиданием по каждому: none или имя нарушенного свойства.
+# Конфиги моделей (Onboarding, MeetingTitle, LocalEngine) под TLC с ожиданием по каждому: none или имя нарушенного свойства.
 # Любой сбой tlc или несовпадение ожидания — ненулевой выход.
 set -u
 cd "$(dirname "$0")" || exit 2
@@ -37,5 +37,9 @@ check MeetingTitle-live none
 check MeetingTitle-noapply NamedAfterSummary
 check MeetingTitle-nocas UserWins
 check MeetingTitle-staleread UserWins
+check LocalEngine-safety none
+check LocalEngine-noshare NoTwinCopies
+check LocalEngine-nopin NoTwinCopies
+check LocalEngine-norelease CloudIdleFree
 echo "check: $ok ok, $failed failed"
 [ "$failed" -eq 0 ]
