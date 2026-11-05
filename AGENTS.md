@@ -43,7 +43,7 @@ Release specifics:
 
 ## Rules
 
-- Behavior constants and semantics come from the macOS reference code (`app/Sources/`), never from third-party research or OSS lookalikes. When in doubt, read the Swift source (ADR-0003).
+- The Windows port takes behavior constants and semantics from the macOS reference code (`app/Sources/`), never from third-party research or OSS lookalikes; when in doubt, read the Swift source. The macOS app itself may borrow behavior and code from anywhere, OSS included, crediting licenses in `app/THIRD_PARTY_NOTICES.md` (ADR-0003).
 - Strict TDD: tests first (red commit), then implementation (green commit). Refactoring is not part of the cycle. Tests attach only to seams (ADR-0002).
 - Real time in unit tests is forbidden — `Clock` is always injected.
 - Never download ML models in dev or CI. Never commit API keys or signing keys.
