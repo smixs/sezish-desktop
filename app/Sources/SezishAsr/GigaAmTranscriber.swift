@@ -201,11 +201,18 @@ public actor GigaAmTranscriber: StreamingTranscriber {
 
     // MARK: - Lazy session setup
 
+    /// Repacking the int8 weights into the engine's own layout costs ~300 MB for the life
+    /// of the session (peak 950 → 650 MB on a 20-minute meeting) and buys no speed here.
+    static let sessionConfig = ["session.disable_prepacking": "1"]
+
     private func sessions() throws -> (ORTSession, ORTSession) {
         if let preprocessor, let acousticModel { return (preprocessor, acousticModel) }
 
         let env = try self.env ?? ORTEnv(loggingLevel: .warning)
         let options = try ORTSessionOptions()
+        for (key, value) in Self.sessionConfig {
+            try options.addConfigEntry(withKey: key, value: value)
+        }
         let preprocessorURL = try Self.bundledResource("gigaam_v3_conv", "onnx")
 
         let preprocessor = try ORTSession(

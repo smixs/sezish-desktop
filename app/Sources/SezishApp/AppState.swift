@@ -140,9 +140,9 @@ final class AppState {
     @ObservationIgnored let meetingRecorder = MeetingRecorder()
     /// Live meeting transcription (local model, chunked); nil while no meeting runs.
     @ObservationIgnored var meetingTranscription: MeetingTranscriptionPipeline?
-    /// Cached local transcriber for meetings — loaded once even when dictation
-    /// runs in cloud mode, so meetings never depend on the network.
-    @ObservationIgnored var meetingLocalTranscriber: Transcriber?
+    /// The one loaded copy of the local model (~600 MB), shared by dictation and every
+    /// meeting job; in cloud dictation it leaves with the last meeting job.
+    @ObservationIgnored var localEngine = LocalEngineSlot<AsrModel, any Transcriber>()
     @ObservationIgnored let recordingPanel = RecordingPanel()
     @ObservationIgnored let sounds = SoundPlayer()
     @ObservationIgnored var meetingDetector: MeetingDetector?

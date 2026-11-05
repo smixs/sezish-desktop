@@ -116,7 +116,10 @@ extension AppState {
     /// no recording — and the user is told why.
     private func meetingStartFailed(_ pipeline: MeetingTranscriptionPipeline?) {
         meetingCallApp = nil
-        pipeline?.cancel()
+        if let pipeline {
+            pipeline.cancel()
+            unpinMeetingEngine()
+        }
         notifier.notify(title: "sezish", body: strings.notifRecordFailed)
     }
 
@@ -206,23 +209,9 @@ extension AppState {
     /// on disk — the meeting is then saved without a transcript and the user
     /// is pointed at the model download.
     private func makeMeetingTranscriptionPipeline() -> MeetingTranscriptionPipeline? {
-        guard let transcriber = meetingSalvageTranscriber() else { return nil }
+        // Pinned until the take is finished (`finishMeeting`) or never started.
+        guard let transcriber = pinMeetingEngine() else { return nil }
         return MeetingTranscriptionPipeline(transcriber: transcriber)
-    }
-
-    /// The one place the local meeting transcriber is resolved and cached, so
-    /// the live pipeline and the crash-salvage path always share one instance.
-    /// Loading is lazy: nil means the model is simply not on disk.
-    func meetingSalvageTranscriber() -> (any Transcriber)? {
-        if meetingLocalTranscriber == nil {
-            // In local dictation mode the loaded model is shared, never loaded twice.
-            if settings.effectiveTranscriptionMode == .local, let activeTranscriber {
-                meetingLocalTranscriber = activeTranscriber
-            } else {
-                meetingLocalTranscriber = loadLocalTranscriber()
-            }
-        }
-        return meetingLocalTranscriber
     }
 
     /// Stems left behind by a crash or a force-quit mid-meeting are re-run
@@ -241,12 +230,14 @@ extension AppState {
         let language = language
         // Loading the local model takes seconds on the main actor, but this
         // branch runs only on the rare launch right after a crash — and doing it
-        // here keeps the cached instance shared with the live pipeline.
-        let transcriber = meetingSalvageTranscriber()
+        // here keeps the one loaded copy shared with the live pipeline.
+        let transcriber = pinMeetingEngine()
         // The detached task must not reach back into AppState (Swift 6), so the
         // refresh comes back through a main-actor closure instead of `self`.
         let finish: @MainActor () -> Void = { [weak self] in
-            self?.pendingMeetings = MeetingSalvage.discoverStems(in: dir)
+            guard let self else { return }
+            self.pendingMeetings = MeetingSalvage.discoverStems(in: dir)
+            if transcriber != nil { self.unpinMeetingEngine() }
         }
 
         Task.detached(priority: .utility) {
@@ -432,6 +423,7 @@ extension AppState {
             self.refreshMeetings()
             self.retryingMeeting = nil
             self.isRetryingMeetings = false
+            self.unpinMeetingEngine() // pinned below, before the loop started
         }
         // Same shape as `finish`: the detached loop reports which meeting it is
         // on without ever touching `self` (Swift 6).
@@ -440,7 +432,7 @@ extension AppState {
         }
 
         Task {
-            guard let transcriber = self.meetingSalvageTranscriber() else {
+            guard let transcriber = self.pinMeetingEngine() else {
                 self.notifier.notify(title: "sezish", body: self.strings.notifModelMissing)
                 self.isRetryingMeetings = false
                 return
@@ -591,6 +583,7 @@ extension AppState {
             meetingStartDate = nil
             meetingWasAutoStarted = false
             meetingCallApp = nil
+            if meetingTranscription != nil { unpinMeetingEngine() }
             meetingTranscription = nil
         }
         do {

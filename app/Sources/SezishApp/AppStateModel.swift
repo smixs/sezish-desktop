@@ -49,7 +49,6 @@ extension AppState {
         localModel = model
         modelStore = ModelStore(model: model)
         modelPhase = modelStore.isComplete ? .ready : .missing
-        meetingLocalTranscriber = nil
         refreshInstalledModels()
         rebuildCoordinator()
     }
@@ -106,13 +105,17 @@ extension AppState {
         // Every path below replaces `activeTranscriber`, and a streaming one holds a live
         // socket that outlives the reference: its receive loop keeps the transport alive,
         // so deinit never comes. Drop the session here — no take is in flight, the guard
-        // above returned if one were. `meetingLocalTranscriber` is never streaming, so a
-        // shared local model can't be hit by this.
-        if let stale = activeTranscriber as? StreamingTranscriber {
+        // above returned if one were. The local model comes back as the same instance,
+        // and that one is left alone: a cancel landing late would kill the next take.
+        let stale = activeTranscriber
+        let transcriber = makeTranscriber(mode: mode)
+        if let stale = stale as? StreamingTranscriber, (stale as AnyObject) !== (transcriber as AnyObject) {
             Task.detached { await stale.cancelStream() }
         }
+        // Dictation left the local model: a copy no meeting job runs on goes now.
+        localEngine.releaseIfIdle(dictationIsLocal: mode == .local)
 
-        guard let transcriber = makeTranscriber(mode: mode) else {
+        guard let transcriber else {
             coordinator = nil
             activeTranscriber = nil
             return
@@ -183,9 +186,25 @@ extension AppState {
     }
 
     /// The selected model as a transcriber, or nil while its files are not on disk.
-    /// A token table that fails to parse is surfaced through `modelPhase`.
+    /// Always the one copy in `localEngine`: a second load is ~600 MB more.
     func loadLocalTranscriber() -> Transcriber? {
         guard modelStore.isComplete else { return nil }
+        return localEngine.engine(for: localModel) { buildLocalTranscriber() }
+    }
+
+    /// The copy a meeting job runs on, held until `unpinMeetingEngine`.
+    func pinMeetingEngine() -> (any Transcriber)? {
+        guard modelStore.isComplete else { return nil }
+        return localEngine.pin(for: localModel) { buildLocalTranscriber() }
+    }
+
+    /// A meeting job is done; in cloud dictation the model leaves with the last one.
+    func unpinMeetingEngine() {
+        localEngine.unpin(dictationIsLocal: settings.effectiveTranscriptionMode == .local)
+    }
+
+    /// A token table that fails to parse is surfaced through `modelPhase`.
+    private func buildLocalTranscriber() -> Transcriber? {
         do {
             let vocab = try Vocab(contentsOf: modelStore.localURL(for: localModel.vocabFile))
             return GigaAmTranscriber(modelURL: modelStore.localURL(for: localModel.onnxFile), vocab: vocab)
