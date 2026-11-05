@@ -75,7 +75,7 @@ struct RecognitionPane: View {
             }
         }
         .formStyle(.grouped)
-        .navigationTitle(SettingsPane.recognition.title(appState.strings))
+        .navigationTitle(appState.strings.recognition)
     }
 
     /// The CHOSEN mode, not the effective one: picking gemini before pasting a key must

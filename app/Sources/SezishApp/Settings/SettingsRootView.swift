@@ -7,7 +7,12 @@ import SezishCore
 /// settings window and not as a themed web page.
 struct SettingsRootView: View {
     @Environment(AppState.self) private var appState
+    @EnvironmentObject private var updater: UpdaterModel
     @State private var selection: SettingsPane = .general
+
+    private var appVersion: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
+    }
 
     var body: some View {
         NavigationSplitView {
@@ -22,12 +27,14 @@ struct SettingsRootView: View {
             .toolbar(removing: .sidebarToggle)
             .navigationSplitViewColumnWidth(175)
             .safeAreaInset(edge: .top) { sidebarHeader }
+            .safeAreaInset(edge: .bottom) { sidebarFooter }
         } detail: {
-            detail
+            NavigationStack { detail }
                 .tint(Brand.accent)
         }
         .navigationSplitViewStyle(.balanced)
-        .frame(minWidth: 520, idealWidth: 560, maxWidth: 620, minHeight: 440, idealHeight: 520)
+        // Wider than before: the meetings page holds a list and a card side by side.
+        .frame(minWidth: 720, idealWidth: 800, maxWidth: 1100, minHeight: 500, idealHeight: 580)
     }
 
     /// List selection is optional by contract; a click on empty sidebar space must
@@ -51,68 +58,65 @@ struct SettingsRootView: View {
         .padding(12)
     }
 
+    /// Quit, the version and the update check, at the foot of the sidebar like hex.
+    private var sidebarFooter: some View {
+        let s = SettingsStrings.forLanguage(appState.language)
+        return VStack(alignment: .leading, spacing: 6) {
+            Button(s.quit) { NSApp.terminate(nil) }
+                .buttonStyle(.plain)
+                .font(.system(size: 12, weight: .medium))
+            Text("\(s.version) \(appVersion)")
+                .font(.system(size: 11).monospacedDigit())
+                .foregroundStyle(.secondary)
+            Button(appState.strings.checkUpdates) { updater.checkForUpdates() }
+                .buttonStyle(.plain)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .disabled(!updater.canCheckForUpdates)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+    }
+
     @ViewBuilder private var detail: some View {
         switch selection {
         case .general: GeneralPane()
-        case .recognition: RecognitionPane()
         case .history: HistoryPane()
-        case .summary: SummaryPane()
-        case .hotkey: HotkeyPane()
-        case .permissions: PermissionsPane()
-        case .updates: UpdatesPane()
+        case .meetings: MeetingsPane()
         }
     }
 }
 
-/// One row of the settings sidebar. The tile colours walk the logo's arc from its
-/// first capsule to its last, so the sidebar reads as the glyph laid on its side.
+/// One row of the settings sidebar. The tiles take the gradient's three stops,
+/// first to last, so the sidebar reads as the brand ramp laid on its side.
 enum SettingsPane: CaseIterable, Identifiable {
     case general
-    case recognition
     case history
-    case summary
-    case hotkey
-    case permissions
-    case updates
+    case meetings
 
     var id: Self { self }
 
     func title(_ strings: Strings) -> String {
         switch self {
         case .general: strings.general
-        case .recognition: strings.recognition
         case .history: strings.paneHistory
-        case .summary: strings.paneSummary
-        case .hotkey: strings.paneHotkey
-        case .permissions: strings.permissions
-        case .updates: strings.paneUpdates
+        case .meetings: strings.historyMeetings
         }
     }
 
     var symbol: String {
         switch self {
         case .general: "gearshape"
-        case .recognition: "waveform"
         case .history: "clock.arrow.circlepath"
-        case .summary: "sparkles"
-        case .hotkey: "keyboard"
-        case .permissions: "lock.shield"
-        case .updates: "arrow.triangle.2.circlepath"
+        case .meetings: "person.2"
         }
     }
 
     var tileColor: Color {
         switch self {
         case .general: Color(hex: 0xFFA700)
-        case .recognition: Color(hex: 0xFF6B00)
-        // The logo has five capsules and there are seven panes now, so these sit
-        // between their neighbours on the same ramp instead of borrowing a
-        // capsule's colour and breaking the walk.
-        case .history: Color(hex: 0xFF5E00)
-        case .summary: Color(hex: 0xFF5000)
-        case .hotkey: Color(hex: 0xFF3600)
-        case .permissions: Color(hex: 0xFF0044)
-        case .updates: Color(hex: 0xFF0087)
+        case .history: Color(hex: 0xFF3600)
+        case .meetings: Color(hex: 0xFF0087)
         }
     }
 }

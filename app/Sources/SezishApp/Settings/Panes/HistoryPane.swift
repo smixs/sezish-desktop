@@ -2,202 +2,171 @@ import AppKit
 import SwiftUI
 import SezishCore
 
-/// Everything the app has recorded: dictations from its own history file and
-/// meetings straight off the folder. The menu shows the last three takes; this
-/// is where the rest of them live, together with the two things the menu has no
-/// room for — the reason a take came out empty, and deleting one.
-///
-/// The window is 620 pt wide at most and the sidebar takes 175 of them, so every
-/// row action is an icon with a `.help`, never a labelled button.
+/// Dictations, newest first, grouped by day, with a search over the text. Meetings
+/// have their own section now. A row copies on hover; a failed take keeps its
+/// reason and can be recognised again; any take with audio can be heard.
 struct HistoryPane: View {
     @Environment(AppState.self) private var appState
+    @State private var query = ""
+    @State private var player: NSSound?
+    @State private var playing: UUID?
+
+    private var s: SettingsStrings { .forLanguage(appState.language) }
+    private var locale: Locale { Locale(identifier: appState.language == .uz ? "uz" : "ru") }
 
     var body: some View {
-        Form {
-            Section {
-                if appState.dictations.isEmpty {
-                    Text(appState.strings.emptyYet)
-                        .foregroundStyle(.secondary)
-                } else {
-                    // Newest first, like the menu: the take just made is the one
-                    // being looked for.
-                    ForEach(appState.dictations.reversed()) { record in
-                        dictationRow(record)
-                    }
+        let found = appState.dictations.filter { TextSearch.matches(query, in: [$0.text, $0.error ?? ""]) }
+        let groups = DayGrouping.group(found, date: \.date)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                SettingsPageTitle(title: appState.strings.paneHistory)
+                Spacer()
+                if let dir = AppState.historyDirectory {
+                    Button(appState.strings.openFolder) { NSWorkspace.shared.activateFileViewerSelecting([dir]) }
+                        .buttonStyle(.link)
+                        .font(.system(size: 11))
+                        .help(appState.strings.openFolderHelp)
                 }
-            } header: {
-                Text(appState.strings.dictations)
-            } footer: {
-                folderButton(
-                    title: appState.strings.openFolder,
-                    help: appState.strings.openFolderHelp,
-                    url: AppState.historyDirectory
-                )
             }
-
-            Section {
-                if appState.meetings.isEmpty {
-                    Text(appState.strings.emptyYet)
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(appState.meetings) { entry in
-                        meetingRow(entry)
+            SettingsSearchField(prompt: s.search, text: $query)
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    if groups.isEmpty {
+                        Text(appState.dictations.isEmpty ? appState.strings.emptyYet : s.nothingFound)
+                            .font(.system(size: 12))
+                            .foregroundStyle(Brand.muted)
+                            .padding(.top, 24)
+                            .frame(maxWidth: .infinity)
+                    }
+                    ForEach(groups, id: \.day) { group in
+                        DayHeader(day: group.day, strings: s, locale: locale)
+                        SettingsCard {
+                            ForEach(Array(group.items.enumerated()), id: \.element.id) { index, record in
+                                DictationRow(record: record, strings: s,
+                                             playing: playing == record.id,
+                                             divider: index < group.items.count - 1,
+                                             onPlay: { play(record) })
+                            }
+                        }
                     }
                 }
-            } header: {
-                Text(appState.strings.historyMeetings)
-            } footer: {
-                // No `.help`: the label already says where the button leads.
-                folderButton(
-                    title: appState.strings.openMeetingsFolder,
-                    help: nil,
-                    url: MeetingRecorder.meetingsDirectory
-                )
+                .padding(.bottom, 12)
             }
         }
-        .formStyle(.grouped)
-        .navigationTitle(SettingsPane.history.title(appState.strings))
-        // Meetings are files, not app state: read them when the tab appears, so a
-        // recording deleted in Finder does not linger in the list.
-        .task { appState.refreshMeetings() }
+        .padding(20)
+        .background(Brand.bg)
+        .onDisappear { player?.stop() }
     }
 
-    // MARK: - Dictations
+    /// Plays the take's WAV; a second click on the same row stops it.
+    private func play(_ record: DictationRecord) {
+        player?.stop()
+        guard playing != record.id, let url = record.audioURL, let sound = NSSound(contentsOf: url, byReference: true)
+        else { playing = nil; return }
+        player = sound
+        playing = record.id
+        sound.play()
+        let duration = sound.duration
+        let id = record.id
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration + 0.1) {
+            if playing == id { playing = nil }
+        }
+    }
+}
 
-    @ViewBuilder private func dictationRow(_ record: DictationRecord) -> some View {
-        HStack(alignment: .top, spacing: 8) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(record.date, format: .dateTime.day().month().hour().minute())
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                Text(record.needsTranscript ? appState.strings.noTextRow : record.text)
-                    .lineLimit(2)
-                    .foregroundStyle(record.needsTranscript ? Color.secondary : Color.primary)
-                // The reason itself, when there is one worth reading: "empty" and
-                // "unknown" are markers for the code, not sentences for a human.
-                if let reason = failureReason(record) {
-                    Text(reason)
-                        .font(.system(size: 11))
-                        .foregroundStyle(Brand.red)
-                        .lineLimit(2)
-                        .truncationMode(.tail)
-                        .help(reason)
-                }
-            }
-            Spacer(minLength: 8)
+private struct DictationRow: View {
+    @Environment(AppState.self) private var appState
+    let record: DictationRecord
+    let strings: SettingsStrings
+    let playing: Bool
+    let divider: Bool
+    let onPlay: () -> Void
+    @State private var hovering = false
+    @State private var copied = false
 
-            HStack(spacing: 4) {
-                iconButton("waveform", help: appState.strings.revealAudio) {
-                    appState.revealAudio(record)
-                }
-                .disabled(record.audioURL == nil)
-
-                Button {
-                    appState.retranscribe(record)
-                } label: {
-                    if appState.retryingDictation == record.id {
-                        ProgressView().controlSize(.small)
-                    } else {
-                        Image(systemName: "arrow.clockwise")
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(alignment: .top, spacing: 10) {
+                Text(record.date, format: .dateTime.hour().minute())
+                    .font(.system(size: 11).monospacedDigit())
+                    .foregroundStyle(Brand.muted)
+                    .frame(width: 38, alignment: .leading)
+                    .padding(.top, 1)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(record.needsTranscript ? appState.strings.noTextRow : record.text)
+                        .font(.system(size: 13))
+                        .foregroundStyle(record.needsTranscript ? Brand.muted : Brand.text)
+                        .lineLimit(3)
+                        .textSelection(.enabled)
+                    if let reason = failureReason {
+                        Text(reason)
+                            .font(.system(size: 11))
+                            .foregroundStyle(Brand.red)
+                            .lineLimit(2)
+                            .help(reason)
                     }
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                // One retry at a time, so every row's ↻ goes down together; a
-                // take whose WAV is gone has nothing to run again.
-                .disabled(appState.retryingDictation != nil || record.audioURL == nil)
-                .help(appState.strings.retryTranscription)
+                Spacer(minLength: 8)
+                actions
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 9)
+            .contentShape(Rectangle())
+            .onHover { hovering = $0 }
+            if divider { BrandDivider().padding(.leading, 62) }
+        }
+    }
 
-                iconButton("trash", help: appState.strings.delete) {
-                    appState.deleteDictation(record)
+    @ViewBuilder private var actions: some View {
+        HStack(spacing: 2) {
+            if record.needsTranscript {
+                icon(appState.retryingDictation == record.id ? nil : "arrow.clockwise",
+                     help: appState.strings.retryTranscription) { appState.retranscribe(record) }
+                    .disabled(appState.retryingDictation != nil || record.audioURL == nil)
+            } else if hovering || copied {
+                icon(copied ? "checkmark" : "doc.on.doc", help: copied ? strings.copied : strings.copy) {
+                    let pasteboard = NSPasteboard.general
+                    pasteboard.clearContents()
+                    pasteboard.setString(record.text, forType: .string)
+                    copied = true
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { copied = false }
                 }
-                .disabled(appState.retryingDictation == record.id)
+            }
+            if hovering || playing, record.audioURL != nil {
+                icon(playing ? "stop.fill" : "play.fill", help: strings.listen, action: onPlay)
+            }
+            if hovering {
+                icon("trash", help: appState.strings.delete) { appState.deleteDictation(record) }
+                    .disabled(appState.retryingDictation == record.id)
             }
         }
+        .frame(minWidth: 60, alignment: .trailing)
+    }
+
+    /// nil symbol draws a spinner in its place.
+    private func icon(_ symbol: String?, help: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Group {
+                if let symbol {
+                    Image(systemName: symbol).font(.system(size: 11, weight: .medium))
+                } else {
+                    ProgressView().controlSize(.mini)
+                }
+            }
+            .frame(width: 22, height: 22)
+            .foregroundStyle(Brand.muted)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(help)
     }
 
     /// `nil` when the take succeeded, or when the failure has no words in it.
-    private func failureReason(_ record: DictationRecord) -> String? {
+    private var failureReason: String? {
         guard let error = record.error,
               error != DictationCoordinator.emptyTranscriptReason,
               error != DictationCoordinator.unknownFailureReason
         else { return nil }
         return error
-    }
-
-    // MARK: - Meetings
-
-    @ViewBuilder private func meetingRow(_ entry: MeetingEntry) -> some View {
-        HStack(alignment: .top, spacing: 8) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(entry.date, format: .dateTime.day().month().hour().minute())
-                Text(entry.base)
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    // Every name starts with "call-" and ends with the minute:
-                    // the middle is what gives, not the tail.
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                if entry.needsRetry {
-                    Text(appState.strings.meetingNeedsRetry)
-                        .font(.system(size: 11))
-                        .foregroundStyle(Brand.accent)
-                }
-            }
-            Spacer(minLength: 8)
-
-            HStack(spacing: 4) {
-                iconButton("doc.text", help: appState.strings.revealFile) {
-                    NSWorkspace.shared.activateFileViewerSelecting([entry.mdURL])
-                }
-                .disabled(!entry.hasMarkdown)
-
-                // Only the takes that still have stems: everything else has all
-                // the text it will ever have.
-                if let stems = entry.stemsURL {
-                    Button {
-                        appState.retryPendingMeetings(only: stems)
-                    } label: {
-                        if appState.retryingMeeting == stems {
-                            ProgressView().controlSize(.small)
-                        } else {
-                            Image(systemName: "arrow.clockwise")
-                        }
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .disabled(appState.isRetryingMeetings || appState.status != .idle)
-                    .help(appState.strings.retryTranscription)
-                }
-            }
-        }
-    }
-
-    // MARK: - Pieces
-
-    private func iconButton(
-        _ symbol: String, help: String, action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            Image(systemName: symbol)
-        }
-        .buttonStyle(.bordered)
-        .controlSize(.small)
-        .help(help)
-    }
-
-    /// Section footers are the one place a labelled button fits: it is alone on
-    /// its line and nothing competes with it for the width.
-    @ViewBuilder private func folderButton(title: String, help: String?, url: URL?) -> some View {
-        if let url {
-            let button = Button(title) { NSWorkspace.shared.activateFileViewerSelecting([url]) }
-                .buttonStyle(.link)
-                .font(.system(size: 11))
-            if let help {
-                button.help(help)
-            } else {
-                button
-            }
-        }
     }
 }

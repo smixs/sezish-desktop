@@ -18,6 +18,27 @@ struct SummaryPane: View {
 
     var body: some View {
         Form {
+            // Recording and the notes folder live here with the summary: every
+            // setting about meetings in one place (hex's Meetings › Settings).
+            Section {
+                Toggle(appState.strings.autoRecordCalls, isOn: autoRecordBinding)
+                LabeledContent {
+                    Button(appState.strings.choose, action: chooseNotesFolder)
+                        .buttonStyle(.bordered)
+                } label: {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(appState.strings.notesFolder)
+                        Text(appState.settings.notesFolder?.path ?? appState.strings.notSelected)
+                            .font(.system(size: 11).monospaced())
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .id(notesFolderVersion)
+            }
+            .toggleStyle(.switch)
+
             Section {
                 Toggle(appState.strings.summaryToggle, isOn: summaryEnabledBinding)
                     .toggleStyle(.switch)
@@ -42,8 +63,7 @@ struct SummaryPane: View {
                 logFooter
             }
 
-            // The picker itself stays in General; duplicating it here would give the
-            // same setting two homes. This is only the reminder that it is unset.
+            // The reminder under the summary, where its absence bites.
             if appState.settings.notesFolder == nil {
                 Section {
                     Label {
@@ -57,17 +77,35 @@ struct SummaryPane: View {
             }
         }
         .formStyle(.grouped)
-        .navigationTitle(SettingsPane.summary.title(appState.strings))
         .task { await model.refresh(engine: appState.settings.summaryEngine) }
     }
 
     // MARK: - Bindings
 
     /// Reads and writes `AppSettings` directly instead of mirroring it in `@State`,
-    /// per the `HotkeyPane` idiom: the pane is rebuilt on every sidebar switch, so a
+    /// per the old Hotkey pane idiom: the pane is rebuilt on every sidebar switch, so a
     /// mirror would start at its default and fire `onChange` with a value the user
     /// never touched. `AppSettings` is a reference type over UserDefaults, so every
     /// render reads the stored truth and no copy can drift from it.
+    private var autoRecordBinding: Binding<Bool> {
+        Binding(get: { appState.autoRecordMeetings }, set: { appState.setAutoRecordMeetings($0) })
+    }
+
+    /// The folder is read straight off settings on every draw; a choice re-renders
+    /// through `notesFolderVersion`.
+    @State private var notesFolderVersion = 0
+
+    private func chooseNotesFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = appState.strings.choosePrompt
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        appState.settings.notesFolder = url
+        notesFolderVersion += 1
+    }
+
     private var summaryEnabledBinding: Binding<Bool> {
         Binding(
             get: { appState.settings.summaryEnabled },
