@@ -47,6 +47,8 @@ struct GeneralPane: View {
                     Text(appState.strings.waveBold).tag(WaveIntensity.bold)
                 }
                 .pickerStyle(.segmented)
+                Button(OnboardingStrings.forLanguage(appState.language).runAgain,
+                       action: appState.showOnboarding)
             } footer: {
                 Text(appState.strings.launchHiddenHint)
                     .font(.system(size: 11))

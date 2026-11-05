@@ -17,7 +17,8 @@ struct SezishApp: App {
             // on manual launch / on reopen" hook (the menu content is not).
             MenuBarLabel(isRecording: appState.isRecordingMeeting,
                          launchedAsLoginItem: delegate.launchedAsLoginItem,
-                         launchHidden: appState.settings.launchHidden)
+                         launchHidden: appState.settings.launchHidden,
+                         appState: appState)
         }
         .menuBarExtraStyle(.window)
 
@@ -34,16 +35,21 @@ private struct MenuBarLabel: View {
     let launchedAsLoginItem: Bool
     /// The user's "start hidden" switch, read once at launch.
     let launchHidden: Bool
+    let appState: AppState
     @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         icon
             .task {
+                // A tour that opens replaces the Settings window, even at login:
+                // dictation could not work without it.
+                if appState.presentOnboardingAtLaunch() { return }
                 guard !launchedAsLoginItem, !launchHidden else { return }
                 NSApp.activate(ignoringOtherApps: true)
                 openSettings()
             }
             .onReceive(NotificationCenter.default.publisher(for: .sezishShowSettings)) { _ in
+                if appState.onboardingWindow.isVisible { appState.showOnboarding(); return }
                 NSApp.activate(ignoringOtherApps: true)
                 openSettings()
             }

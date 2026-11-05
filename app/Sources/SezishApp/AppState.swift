@@ -160,6 +160,8 @@ final class AppState {
     /// Turns the monitor's raw press/release edges into start/stop per the current mode.
     @ObservationIgnored private var hotkeyInterpreter: HotkeyModeInterpreter?
     @ObservationIgnored private var permissionPoll: Timer?
+    /// The first-run tour; fed by the permission poll while it is open.
+    @ObservationIgnored let onboardingWindow = OnboardingWindow()
 
     init() {
         settings = AppSettings(defaults: .standard, bakedCloud: Self.bakedCloudCredentials())
@@ -379,6 +381,22 @@ final class AppState {
 
         let micAuthorized = AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
         if micAuthorized != microphoneAuthorized { microphoneAuthorized = micAuthorized }
+        onboardingWindow.controller?.tick()
+    }
+
+    // MARK: - Onboarding
+
+    /// Opens the tour at launch when dictation could not work yet (or right after
+    /// a relaunch the tour started). True when it opened, so Settings stays shut.
+    func presentOnboardingAtLaunch() -> Bool {
+        guard OnboardingController.neededAtLaunch(self) else { return false }
+        onboardingWindow.show(appState: self)
+        return true
+    }
+
+    /// "Run setup again" from Settings, or bringing an open tour forward.
+    func showOnboarding() {
+        onboardingWindow.show(appState: self)
     }
 
     // MARK: - Dictation pipeline
