@@ -57,6 +57,10 @@ struct Strings {
     let waveCalm: String
     let waveLively: String
     let waveBold: String
+    let hudPlacement: String
+    let hudBottom: String
+    let hudMenuBar: String
+    let hudNotch: String
 
     // Settings: notes folder
     let notesFolder: String
@@ -298,6 +302,10 @@ extension Strings {
         waveCalm: "Спокойно",
         waveLively: "Живее",
         waveBold: "Дерзко",
+        hudPlacement: "Место плашки",
+        hudBottom: "Внизу",
+        hudMenuBar: "Под строкой меню",
+        hudNotch: "У выреза",
         notesFolder: "Папка заметок",
         notSelected: "Не выбрана",
         choose: "Выбрать…",
@@ -460,6 +468,10 @@ extension Strings {
         waveCalm: "Sokin",
         waveLively: "Jonli",
         waveBold: "Shiddatli",
+        hudPlacement: "Plashka joyi",
+        hudBottom: "Pastda",
+        hudMenuBar: "Menyu satri ostida",
+        hudNotch: "Kesik yonida",
         notesFolder: "Qaydlar papkasi",
         notSelected: "Tanlanmagan",
         choose: "Tanlash…",

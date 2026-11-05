@@ -12,6 +12,7 @@ struct GeneralPane: View {
 
     @State private var playSounds = true
     @State private var soundVolume = 0.5
+    @State private var placement: HUDPlacement = .bottom
     @State private var launchAtLogin = false
     @State private var showAdvanced = false
     @State private var showSecureInputFix = false
@@ -128,6 +129,16 @@ struct GeneralPane: View {
                 .labelsHidden()
                 .pickerStyle(.segmented)
                 .fixedSize()
+            }
+            SettingsRow(icon: "rectangle.bottomhalf.inset.filled", title: appState.strings.hudPlacement) {
+                Picker("", selection: $placement) {
+                    Text(appState.strings.hudBottom).tag(HUDPlacement.bottom)
+                    Text(appState.strings.hudMenuBar).tag(HUDPlacement.menuBar)
+                    Text(appState.strings.hudNotch).tag(HUDPlacement.notch)
+                }
+                .labelsHidden()
+                .fixedSize()
+                .onChange(of: placement) { _, value in appState.setHUDPlacement(value) }
             }
             SettingsRow(icon: "speaker.wave.2", title: appState.strings.soundsToggle) {
                 HStack(spacing: 10) {
@@ -248,6 +259,7 @@ struct GeneralPane: View {
     private func syncFromStorage() {
         playSounds = appState.settings.playSounds
         soundVolume = appState.settings.soundVolume
+        placement = appState.settings.hudPlacement
         // Login-item state is never cached — always read live from the system.
         launchAtLogin = (SMAppService.mainApp.status == .enabled)
     }

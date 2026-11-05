@@ -1,7 +1,9 @@
 import AppKit
 import SwiftUI
+import SezishCore
 
-/// Brand HUD at the bottom-center of the screen while dictation runs: a single
+/// Brand HUD on screen while dictation runs (bottom centre by default, or at
+/// the top: `placement`): a single
 /// round button with the S-wave glyph dancing to the mic level. When the hotkey
 /// is released the glyph morphs into a spinning ring and the HUD stays up until
 /// the transcript is inserted. A take that went wrong widens the circle into a
@@ -13,7 +15,11 @@ final class RecordingOverlay {
     private static let circleSize = NSSize(width: 44, height: 44)
     /// Panel is larger than the circle so the rim glow isn't clipped at the edges.
     private static let glowMargin: CGFloat = 12
-    private static let riseOffset: CGFloat = 8
+    /// Where it sits; read at the next show.
+    var placement: HUDPlacement = .bottom
+    private var reduceMotion: Bool { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
+    /// Reduce Motion keeps the fade and drops the travel.
+    private var enterOffset: CGFloat { reduceMotion ? 0 : HUDGeometry.enterOffset(placement) }
 
     private var panel: NSPanel?
     private var hosting: NSHostingView<OverlayHUD>?
@@ -31,7 +37,7 @@ final class RecordingOverlay {
 
         let final = targetFrame()
         var start = final
-        start.origin.y -= Self.riseOffset
+        start.origin.y += enterOffset
         panel.setFrame(start, display: false)
         panel.alphaValue = 0
         panel.orderFrontRegardless()
@@ -63,11 +69,11 @@ final class RecordingOverlay {
         generation += 1
         let expected = generation
         onNoticeClick = onClick
-        let wide = Self.frame(width: Self.pillWidth(for: text))
+        let wide = frame(width: Self.pillWidth(for: text))
         if !panel.isVisible {
             // Nothing on screen yet (the take never started): rise in as the circle first.
             var start = targetFrame()
-            start.origin.y -= Self.riseOffset
+            start.origin.y += enterOffset
             panel.setFrame(start, display: false)
             panel.alphaValue = 0
             panel.orderFrontRegardless()
@@ -80,7 +86,7 @@ final class RecordingOverlay {
         // pill: the panel shrinks to it.
         panel.ignoresMouseEvents = onClick == nil
         NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0 : 0.32
+            ctx.duration = reduceMotion ? 0 : 0.32
             ctx.timingFunction = CAMediaTimingFunction(controlPoints: 0.23, 1, 0.32, 1)
             panel.animator().alphaValue = 1
             panel.animator().setFrame(wide, display: true)
@@ -105,7 +111,7 @@ final class RecordingOverlay {
         panel.ignoresMouseEvents = true
 
         var down = panel.frame
-        down.origin.y -= Self.riseOffset
+        down.origin.y += enterOffset
         NSAnimationContext.runAnimationGroup { ctx in
             ctx.duration = 0.22
             ctx.timingFunction = CAMediaTimingFunction(controlPoints: 0.16, 1, 0.3, 1)
@@ -173,20 +179,15 @@ final class RecordingOverlay {
         return max(circleSize.width, noticePadding * 2 + noticeIconWidth + noticeSpacing + textWidth)
     }
 
-    private func targetFrame() -> NSRect { Self.frame(width: Self.circleSize.width) }
+    private func targetFrame() -> NSRect { frame(width: Self.circleSize.width) }
 
-    /// The panel around a HUD `width` wide, centred where the circle sits.
-    private static func frame(width: CGFloat) -> NSRect {
-        let size = NSSize(width: width + glowMargin * 2, height: panelContentSize.height)
+    /// The panel around a HUD `width` wide, where `placement` puts the circle.
+    private func frame(width: CGFloat) -> NSRect {
+        let size = NSSize(width: width + Self.glowMargin * 2, height: Self.panelContentSize.height)
         guard let screen = NSScreen.main else { return NSRect(origin: .zero, size: size) }
-        let visible = screen.visibleFrame
-        return NSRect(
-            x: visible.midX - size.width / 2,
-            // The circle bottom sits at the same +80 the old overlay used.
-            y: visible.minY + 80 - glowMargin,
-            width: size.width,
-            height: size.height
-        )
+        return HUDGeometry.frame(placement: placement, panel: size, glowMargin: Self.glowMargin,
+                                 screen: screen.frame, visible: screen.visibleFrame,
+                                 notchHeight: screen.safeAreaInsets.top)
     }
 }
 

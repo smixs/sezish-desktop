@@ -204,6 +204,12 @@ public final class AppSettings {
         set { defaults.set(newValue.rawValue, forKey: Keys.waveIntensity) }
     }
 
+    /// Where the dictation HUD sits; unknown or absent values fall back to bottom.
+    public var hudPlacement: HUDPlacement {
+        get { defaults.string(forKey: Keys.hudPlacement).flatMap(HUDPlacement.init(rawValue:)) ?? .bottom }
+        set { defaults.set(newValue.rawValue, forKey: Keys.hudPlacement) }
+    }
+
     /// Brand sounds of dictation and meetings. Default on.
     public var playSounds: Bool {
         get { defaults.object(forKey: Keys.playSounds) as? Bool ?? true }
@@ -298,6 +304,7 @@ public final class AppSettings {
         static let appLanguage = "appLanguage"
         static let playSounds = "playSounds"
         static let soundVolume = "soundVolume"
+        static let hudPlacement = "hudPlacement"
         static let waveIntensity = "waveIntensity"
         static let extraDenyApps = "extraDenyApps"
         static let meetingHook = "meetingHook"

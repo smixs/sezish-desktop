@@ -188,6 +188,7 @@ final class AppState {
         soundsEnabled = settings.playSounds
         sounds.volume = Float(settings.soundVolume)
         levelMeter.intensity = settings.waveIntensity
+        overlay.placement = settings.hudPlacement
         notifier.onSummaryRetry = { [weak self] md in self?.retrySummary(meetingMd: md) }
         // Only while this session's capture is broken: a restart banner left in
         // Notification Center by an earlier session must not kill a live recording.
@@ -218,6 +219,11 @@ final class AppState {
     func setWaveIntensity(_ intensity: WaveIntensity) {
         levelMeter.intensity = intensity
         settings.waveIntensity = intensity
+    }
+
+    func setHUDPlacement(_ placement: HUDPlacement) {
+        overlay.placement = placement
+        settings.hudPlacement = placement
     }
 
     func setSoundsEnabled(_ enabled: Bool) {
