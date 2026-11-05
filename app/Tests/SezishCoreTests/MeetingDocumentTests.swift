@@ -56,6 +56,19 @@ struct MeetingDocumentTests {
         #expect(doc.title == "Запись звонка")
     }
 
+    @Test func renameKeepsTheDateStampAndEverythingElse() {
+        let renamed = MeetingDocument.renamed(sample, to: "  Запуск с Азизом ")
+        #expect(renamed == "# Запуск с Азизом - 4 ноября 2026 г. в 14:00" + sample.drop { $0 != "\n" })
+        #expect(MeetingDocument(markdown: renamed ?? "", speakers: ["Я"]).title == "Запуск с Азизом")
+    }
+
+    @Test func renameRefusesBlankTitlesAndFilesWithoutAHeading() {
+        #expect(MeetingDocument.renamed(sample, to: "   ") == nil)
+        #expect(MeetingDocument.renamed("просто текст", to: "Новое") == nil)
+        #expect(MeetingDocument.renamed(sample, to: "две\nстроки") == "# две строки - 4 ноября 2026 г. в 14:00"
+            + sample.drop { $0 != "\n" })
+    }
+
     @Test func aHandWrittenFileStillReads() {
         let doc = MeetingDocument(markdown: "просто текст", speakers: ["Я"])
         #expect(doc.heading == nil)
