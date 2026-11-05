@@ -183,6 +183,7 @@ final class AppState {
 
         autoRecordMeetings = settings.autoRecordMeetings
         soundsEnabled = settings.playSounds
+        sounds.volume = Float(settings.soundVolume)
         levelMeter.intensity = settings.waveIntensity
         notifier.onSummaryRetry = { [weak self] md in self?.retrySummary(meetingMd: md) }
         // Only while this session's capture is broken: a restart banner left in
@@ -219,6 +220,17 @@ final class AppState {
     func setSoundsEnabled(_ enabled: Bool) {
         soundsEnabled = enabled
         settings.playSounds = enabled
+    }
+
+    /// Stores the volume and plays the start sound at it, so the slider is heard.
+    func setSoundVolume(_ volume: Double) {
+        settings.soundVolume = volume
+        sounds.volume = Float(settings.soundVolume)
+        if soundsEnabled { sounds.play(.start) }
+    }
+
+    func playSound(_ event: SoundEvent) {
+        if soundsEnabled { sounds.play(event) }
     }
 
     /// Persists the language choice; views re-render off the observed mirror.
@@ -430,7 +442,7 @@ final class AppState {
         if coordinator.state == .recording {
             shortcutMonitor?.isEscapeArmed = true
             overlay.show(meter: levelMeter)
-            if soundsEnabled { sounds.play(.dictation) }
+            playSound(.start)
         } else {
             notifier.notify(title: "sezish", body: strings.notifRecordFailed)
         }
@@ -445,9 +457,11 @@ final class AppState {
         }
         // The HUD stays up as a spinner until the transcript lands (or fails).
         overlay.beginTranscribing()
+        playSound(.stop)
         Task {
             let outcome = await coordinator.end()
             self.overlay.hide()
+            if let ending = SoundEvent.after(outcome) { self.playSound(ending) }
             self.refreshDictations()
             switch outcome {
             case .insertFailed(let message):
@@ -470,6 +484,7 @@ final class AppState {
         overlay.hide()
         levelMeter.reset()
         guard let coordinator, coordinator.state == .recording else { return }
+        playSound(.cancel)
         Task { await coordinator.cancel() }
     }
 

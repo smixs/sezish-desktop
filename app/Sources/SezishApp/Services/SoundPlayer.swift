@@ -1,29 +1,26 @@
 import AppKit
+import SezishCore
 
-/// Plays the short start chimes. Instances are cached; volume stays low — these
-/// fire on every recording, so they whisper rather than announce.
+/// Plays the brand sounds. Instances are cached; the volume comes from settings
+/// and applies to the next sound played.
 @MainActor
 final class SoundPlayer {
-    enum Chime: String {
-        case dictation = "chime-dictation"
-        case meeting = "chime-meeting"
-    }
+    var volume: Float = 0.5
+    private var cache: [SoundEvent: NSSound] = [:]
 
-    private var cache: [Chime: NSSound] = [:]
-
-    func play(_ chime: Chime) {
+    func play(_ event: SoundEvent) {
         let sound: NSSound?
-        if let cached = cache[chime] {
+        if let cached = cache[event] {
             sound = cached
-        } else if let url = moduleResources.url(forResource: chime.rawValue, withExtension: "caf"),
+        } else if let url = moduleResources.url(forResource: event.resourceName, withExtension: "caf"),
                   let loaded = NSSound(contentsOf: url, byReference: true) {
-            loaded.volume = 0.35
-            cache[chime] = loaded
+            cache[event] = loaded
             sound = loaded
         } else {
             sound = nil
         }
         sound?.stop()
+        sound?.volume = volume
         sound?.play()
     }
 }

@@ -11,6 +11,7 @@ struct GeneralPane: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var playSounds = true
+    @State private var soundVolume = 0.5
     @State private var launchAtLogin = false
     @State private var showAdvanced = false
 
@@ -106,9 +107,22 @@ struct GeneralPane: View {
                 .fixedSize()
             }
             SettingsRow(icon: "speaker.wave.2", title: appState.strings.soundsToggle) {
-                Toggle("", isOn: $playSounds)
+                HStack(spacing: 10) {
+                    // The volume is heard on release, at the new level.
+                    Slider(value: $soundVolume, in: 0...1) { editing in
+                        if !editing { appState.setSoundVolume(soundVolume) }
+                    }
                     .labelsHidden()
-                    .onChange(of: playSounds) { _, value in appState.setSoundsEnabled(value) }
+                    .controlSize(.small)
+                    .frame(width: 110)
+                    .disabled(!playSounds)
+                    .opacity(playSounds ? 1 : 0.4)
+                    .help(s.soundVolume)
+                    .accessibilityLabel(s.soundVolume)
+                    Toggle("", isOn: $playSounds)
+                        .labelsHidden()
+                        .onChange(of: playSounds) { _, value in appState.setSoundsEnabled(value) }
+                }
             }
             SettingsRow(icon: "power", title: appState.strings.launchAtLogin, divider: false) {
                 Toggle("", isOn: $launchAtLogin)
@@ -210,6 +224,7 @@ struct GeneralPane: View {
 
     private func syncFromStorage() {
         playSounds = appState.settings.playSounds
+        soundVolume = appState.settings.soundVolume
         // Login-item state is never cached — always read live from the system.
         launchAtLogin = (SMAppService.mainApp.status == .enabled)
     }

@@ -36,6 +36,7 @@ struct SettingsStrings {
     let noTranscript: String
     let minutes: String
     let meetingsItem: String
+    let soundVolume: String
 
     static func forLanguage(_ language: AppLanguage) -> SettingsStrings {
         language == .uz ? .uz : .ru
@@ -71,7 +72,8 @@ struct SettingsStrings {
         pickMeeting: "Выберите встречу слева",
         noTranscript: "Текст не распознался",
         minutes: "мин",
-        meetingsItem: "Встречи…"
+        meetingsItem: "Встречи…",
+        soundVolume: "Громкость звуков"
     )
 
     static let uz = SettingsStrings(
@@ -104,6 +106,7 @@ struct SettingsStrings {
         pickMeeting: "Chapdan uchrashuvni tanlang",
         noTranscript: "Matn aniqlanmadi",
         minutes: "daq",
-        meetingsItem: "Uchrashuvlar…"
+        meetingsItem: "Uchrashuvlar…",
+        soundVolume: "Tovushlar balandligi"
     )
 }

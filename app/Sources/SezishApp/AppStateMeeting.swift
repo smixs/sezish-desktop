@@ -121,7 +121,7 @@ extension AppState {
     }
 
     /// Everything that happens once the recorder is running: the state the detector
-    /// and the menu read, the warning when only the mic could be recorded, the chime,
+    /// and the menu read, the warning when only the mic could be recorded, the sound,
     /// and the panel with its stop/hide hooks.
     private func presentMeetingStart(outcome: MeetingRecorder.StartOutcome, auto: Bool) {
         meetingWasAutoStarted = auto
@@ -131,7 +131,7 @@ extension AppState {
         let startDate = meetingRecorder.startDate
         status = .recordingMeeting
         meetingStartDate = startDate
-        if soundsEnabled { sounds.play(.meeting) }
+        playSound(.meetingStart)
         recordingPanel.show(
             startDate: startDate ?? Date(),
             auto: auto,
@@ -535,6 +535,7 @@ extension AppState {
         meetingStopPoll?.invalidate()
         meetingStopPoll = nil
         recordingPanel.hide()
+        playSound(.meetingStop)
         status = .processingMeeting
         Task { await self.finishMeeting(reason: reason) }
     }
