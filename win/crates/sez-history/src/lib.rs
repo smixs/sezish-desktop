@@ -9,6 +9,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
 const INDEX_FILE_NAME: &str = "index.json";
+/// `sez_core::wav::encode_pcm16_mono_16k` writes the canonical 44-byte header.
+const WAV_HEADER_BYTES: usize = 44;
 
 /// File-backed history storing metadata in `index.json` and audio in sibling WAV files.
 pub struct FileHistory {
@@ -64,6 +66,62 @@ impl FileHistory {
         }
     }
 
+    /// Only takes with text count against the capacity: one whose text never came
+    /// out keeps its audio until a retry recovers it (Mac `evictOverflow`).
+    fn evict_overflow(&mut self) {
+        while self
+            .records
+            .iter()
+            .filter(|record| !record.text.is_empty())
+            .count()
+            > self.max_count
+        {
+            let Some(oldest) = self
+                .records
+                .iter()
+                .position(|record| !record.text.is_empty())
+            else {
+                return;
+            };
+            let removed = self.records.remove(oldest);
+            let _ = fs::remove_file(self.directory.join(removed.audio_file));
+        }
+    }
+
+    /// `newest_index` counts from the newest, as `recent` lists them.
+    fn position(&self, newest_index: usize) -> Result<usize, SezError> {
+        self.records
+            .len()
+            .checked_sub(newest_index + 1)
+            .ok_or_else(|| SezError::Other("history index is outside the list".to_owned()))
+    }
+
+    /// Where a take's audio lies, for «Послушать».
+    pub fn audio_path(&self, newest_index: usize) -> Result<PathBuf, SezError> {
+        let record = &self.records[self.position(newest_index)?];
+        Ok(self.directory.join(&record.audio_file))
+    }
+
+    /// The take's audio as it was recorded, for «Распознать заново».
+    pub fn samples(&self, newest_index: usize) -> Result<Vec<i16>, SezError> {
+        let bytes = fs::read(self.audio_path(newest_index)?)?;
+        let pcm = bytes.get(WAV_HEADER_BYTES..).ok_or_else(|| {
+            SezError::Other("history audio is shorter than its header".to_owned())
+        })?;
+        Ok(pcm
+            .chunks_exact(2)
+            .map(|pair| i16::from_le_bytes([pair[0], pair[1]]))
+            .collect())
+    }
+
+    /// A retry's text replaces the stored one; id, date and audio stay.
+    pub fn update_text(&mut self, newest_index: usize, text: &str) -> Result<(), SezError> {
+        let position = self.position(newest_index)?;
+        self.records[position].text = text.to_owned();
+        self.evict_overflow();
+        self.persist()
+    }
+
     fn persist(&self) -> Result<(), SezError> {
         let index = serde_json::to_vec(&self.records)
             .map_err(|error| SezError::Other(error.to_string()))?;
@@ -92,11 +150,7 @@ impl History for FileHistory {
             recorded_at: StoredTimestamp::from(elapsed),
         });
 
-        while self.records.len() > self.max_count {
-            let oldest = self.records.remove(0);
-            let _ = fs::remove_file(self.directory.join(oldest.audio_file));
-        }
-
+        self.evict_overflow();
         self.persist()
     }
 
@@ -427,7 +481,10 @@ mod tests {
         history.record("newer", &[1]).await.unwrap();
 
         assert_eq!(history.samples(1).unwrap(), vec![7, -8, 9]);
-        assert!(history.audio_path(1).unwrap().ends_with(wav_file_name(&index_records(directory.path())[0])));
+        assert!(history
+            .audio_path(1)
+            .unwrap()
+            .ends_with(wav_file_name(&index_records(directory.path())[0])));
 
         history.update_text(1, "recovered").unwrap();
 
@@ -459,5 +516,4 @@ mod tests {
             .collect();
         assert_eq!(texts, ["new", "recovered"]);
     }
-
 }
