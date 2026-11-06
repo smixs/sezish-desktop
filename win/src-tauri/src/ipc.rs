@@ -84,6 +84,14 @@ pub async fn set_play_sounds(
 }
 
 #[tauri::command]
+pub async fn set_sound_volume(
+    controller: State<'_, Arc<AppController>>,
+    percent: u8,
+) -> Result<SettingsDto, AppError> {
+    controller.set_sound_volume(percent).await
+}
+
+#[tauri::command]
 pub async fn set_autostart(
     controller: State<'_, Arc<AppController>>,
     enabled: bool,

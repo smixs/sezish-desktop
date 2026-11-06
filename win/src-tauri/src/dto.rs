@@ -13,6 +13,7 @@ pub struct SettingsDto {
     pub language: Option<AppLanguage>,
     pub resolved_language: AppLanguage,
     pub play_sounds: bool,
+    pub sound_volume: u8,
     pub autostart_enabled: bool,
 }
 

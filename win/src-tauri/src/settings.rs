@@ -37,6 +37,13 @@ pub struct Settings {
     pub local_model: AsrModel,
     pub language: Option<AppLanguage>,
     pub play_sounds: bool,
+    /// Percent, 0–100 (Mac `soundVolume` 0…1, default 0.5).
+    #[serde(default = "default_sound_volume")]
+    pub sound_volume: u8,
+}
+
+fn default_sound_volume() -> u8 {
+    50
 }
 
 impl Default for Settings {
@@ -48,6 +55,7 @@ impl Default for Settings {
             local_model: AsrModel::default(),
             language: None,
             play_sounds: true,
+            sound_volume: default_sound_volume(),
         }
     }
 }
@@ -95,6 +103,9 @@ impl Settings {
         }
         if let Some(play_sounds) = value.get("play_sounds").and_then(Value::as_bool) {
             settings.play_sounds = play_sounds;
+        }
+        if let Some(volume) = value.get("sound_volume").and_then(Value::as_u64) {
+            settings.sound_volume = volume.min(100) as u8;
         }
         settings
     }

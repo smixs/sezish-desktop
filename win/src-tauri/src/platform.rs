@@ -163,41 +163,6 @@ pub fn set_autostart(_enabled: bool) -> Result<(), AppError> {
     Ok(())
 }
 
-#[cfg(windows)]
-pub fn play_start_sound_if_available(enabled: bool) {
-    use std::os::windows::ffi::OsStrExt;
-    use windows::core::PCWSTR;
-    use windows::Win32::Media::Audio::{PlaySoundW, SND_ASYNC, SND_FILENAME};
-
-    if !enabled {
-        return;
-    }
-    let Some(path) = sound_asset_path() else {
-        return;
-    };
-    let wide: Vec<u16> = path
-        .as_os_str()
-        .encode_wide()
-        .chain(std::iter::once(0))
-        .collect();
-    unsafe {
-        let _ = PlaySoundW(PCWSTR(wide.as_ptr()), None, SND_FILENAME | SND_ASYNC);
-    }
-}
-
-#[cfg(not(windows))]
-pub fn play_start_sound_if_available(_enabled: bool) {}
-
-#[cfg(windows)]
-fn sound_asset_path() -> Option<std::path::PathBuf> {
-    let executable = std::env::current_exe().ok()?;
-    let path = executable
-        .parent()?
-        .join("resources")
-        .join("chime-dictation.wav");
-    path.is_file().then_some(path)
-}
-
 /// Blocking error box for startup failures. Only used before the tray exists,
 /// when there is no other way to tell the user anything.
 #[cfg(windows)]

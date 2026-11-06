@@ -5,8 +5,8 @@ use crate::error::AppError;
 use crate::hotkey::HotkeyAdapter;
 use crate::model_idle::ModelIdlePolicy;
 use crate::platform::{
-    autostart_enabled, copy_text, open_history_folder, play_start_sound_if_available,
-    set_autostart, system_locale, PlatformInserter, SystemClock,
+    autostart_enabled, copy_text, open_history_folder, set_autostart, system_locale,
+    PlatformInserter, SystemClock,
 };
 use crate::settings::{
     effective_transcription_mode, resolve_system_language, settings_path, AppLanguage,
@@ -17,6 +17,7 @@ use async_trait::async_trait;
 use sez_asr_cloud::CloudTranscriber;
 use sez_asr_local::{AsrModel, LocalTranscriber, ModelDownloader, ModelStore};
 use sez_audio::CpalMic;
+use sez_core::feedback::SoundEvent;
 use sez_core::{Clock, Coordinator, History, HistoryEntry, SezError, State, Transcriber};
 use sez_history::FileHistory;
 use sez_hotkey::{Command, HotkeyMode, Shortcut};
@@ -202,6 +203,7 @@ impl AppController {
             }
             rebuilt?;
         }
+        let sound = (runtime.settings.play_sounds, runtime.settings.sound_volume);
         let coordinator = runtime.coordinator.as_mut().ok_or_else(|| {
             AppError::not_ready("Local model is required. Download it from the sezish tray menu.")
         })?;
@@ -211,6 +213,7 @@ impl AppController {
         if coordinator.state() != State::Recording {
             self.recording.store(false, Ordering::Release);
             self.tray.set_phase(&self.app, TrayPhase::Idle);
+            play_if(sound, SoundEvent::Error);
             return Err(AppError::not_ready(
                 "Could not start microphone capture. Check Windows microphone permission.",
             ));
@@ -221,10 +224,9 @@ impl AppController {
         if runtime.coordinator_mode == Some(TranscriptionPreference::Local) {
             lock_recover(&self.model_idle).on_active();
         }
-        let play_sounds = runtime.settings.play_sounds;
         drop(runtime);
         self.tray.set_phase(&self.app, TrayPhase::Recording);
-        play_start_sound_if_available(play_sounds);
+        self.play_sound(SoundEvent::Start).await;
         Ok(())
     }
 
@@ -234,6 +236,7 @@ impl AppController {
             .take()
             .map(|since| since.elapsed());
         let mut runtime = self.runtime.lock().await;
+        let sound = (runtime.settings.play_sounds, runtime.settings.sound_volume);
         let Some(coordinator) = runtime.coordinator.as_mut() else {
             self.tray.set_phase(&self.app, TrayPhase::Idle);
             return Ok(DictationOutcomeDto::Ignored);
@@ -244,8 +247,12 @@ impl AppController {
         }
 
         self.tray.set_phase(&self.app, TrayPhase::Transcribing);
+        play_if(sound, SoundEvent::Stop);
         let released_at = Instant::now();
         let outcome = coordinator.end().await;
+        if let Some(ending) = SoundEvent::after(&outcome) {
+            play_if(sound, ending);
+        }
         crate::obs::log(&format!(
             "dictation end: audio={} total={:.1}s outcome={outcome:?}",
             recorded_for.map_or_else(
@@ -269,10 +276,12 @@ impl AppController {
     pub async fn cancel(&self) -> Result<(), AppError> {
         self.recording.store(false, Ordering::Release);
         let mut runtime = self.runtime.lock().await;
+        let sound = (runtime.settings.play_sounds, runtime.settings.sound_volume);
         if let Some(coordinator) = runtime.coordinator.as_mut() {
             if coordinator.state() == State::Recording {
                 self.tray.set_phase(&self.app, TrayPhase::Transcribing);
                 coordinator.cancel().await;
+                play_if(sound, SoundEvent::Cancel);
                 if runtime.coordinator_mode == Some(TranscriptionPreference::Local) {
                     lock_recover(&self.model_idle).on_idle(self.clock.as_ref());
                 }
@@ -409,6 +418,25 @@ impl AppController {
             runtime.settings.save(&self.settings_path)?;
         }
         self.settings().await
+    }
+
+    /// Saved and heard at once, like the Mac slider on release.
+    pub async fn set_sound_volume(&self, percent: u8) -> Result<SettingsDto, AppError> {
+        {
+            let mut runtime = self.runtime.lock().await;
+            runtime.settings.sound_volume = percent.min(100);
+            runtime.settings.save(&self.settings_path)?;
+        }
+        self.play_sound(SoundEvent::Done).await;
+        self.settings().await
+    }
+
+    async fn play_sound(&self, event: SoundEvent) {
+        let runtime = self.runtime.lock().await;
+        play_if(
+            (runtime.settings.play_sounds, runtime.settings.sound_volume),
+            event,
+        );
     }
 
     pub async fn set_autostart(&self, enabled: bool) -> Result<SettingsDto, AppError> {
@@ -548,6 +576,7 @@ impl AppController {
             language: settings.language,
             resolved_language: resolved,
             play_sounds: settings.play_sounds,
+            sound_volume: settings.sound_volume,
             autostart_enabled: autostart_enabled()?,
         })
     }
@@ -890,4 +919,11 @@ fn updater_error(step: &str, error: impl std::fmt::Display) -> AppError {
     let message = format!("Could not {step}: {error}");
     crate::obs::log(&message);
     AppError::platform(message)
+}
+
+/// The sound settings at the moment of the event: (enabled, volume percent).
+fn play_if((enabled, percent): (bool, u8), event: SoundEvent) {
+    if enabled {
+        crate::sounds::play(event, percent);
+    }
 }
