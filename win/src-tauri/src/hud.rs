@@ -1,5 +1,5 @@
 //! On-screen dictation indicator: a small transparent always-on-top window at
-//! the bottom centre of the primary monitor. It never takes focus
+//! the bottom (or top) centre of the monitor the user works on. It never takes focus
 //! (`focusable(false)` = `WS_EX_NOACTIVATE`) and ignores the cursor, so the
 //! text being dictated into keeps the caret. Pure Tauri, no WinAPI (ADR-0001).
 //!
@@ -7,13 +7,52 @@
 //! still shows the phase, and every failure goes to the field log.
 
 use crate::tray::TrayPhase;
-use tauri::{AppHandle, PhysicalPosition, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+use sez_core::wave::{decibels, rms, AutoLevel, WaveIntensity};
+use tauri::{
+    AppHandle, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
+};
 
 pub const LABEL: &str = "hud";
 /// Logical window size; the page draws a 44 px circle inside a glow margin.
 const SIZE: f64 = 72.0;
 /// Logical distance from the bottom edge of the work area (above the taskbar).
 const BOTTOM_MARGIN: f64 = 80.0;
+/// Logical distance from the top edge in the top placement (Mac `topGap`).
+const TOP_GAP: f64 = 10.0;
+/// Notice pill width estimate: per character of text, plus the padding and the
+/// error mark, capped so a long line never spans the screen.
+pub const NOTICE_CHAR_PX: f64 = 7.4;
+pub const NOTICE_PADDING_PX: f64 = 64.0;
+pub const NOTICE_MAX_PX: f64 = 420.0;
+
+/// Where the indicator sits: above the taskbar (default) or under the top edge.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum HudPlacement {
+    #[default]
+    Bottom,
+    Top,
+}
+
+impl HudPlacement {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Bottom => "bottom",
+            Self::Top => "top",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        [Self::Bottom, Self::Top]
+            .into_iter()
+            .find(|placement| placement.name() == name)
+    }
+}
+
+impl serde::Serialize for HudPlacement {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.name())
+    }
+}
 
 pub struct Hud {
     window: WebviewWindow,
@@ -95,6 +134,98 @@ pub fn origin(area: WorkArea, size: i32, scale: f64) -> (i32, i32) {
     let x = area.x + ((area.width - size) / 2).max(0);
     let y = area.y + (area.height - size - margin).max(0);
     (x, y)
+}
+
+/// Top-left corner for a `size` px square window in `placement`.
+pub fn placed(area: WorkArea, size: i32, scale: f64, placement: HudPlacement) -> (i32, i32) {
+    match placement {
+        HudPlacement::Bottom => origin(area, size, scale),
+        HudPlacement::Top => {
+            let gap = (TOP_GAP * scale).round() as i32;
+            (area.x + ((area.width - size) / 2).max(0), area.y + gap)
+        }
+    }
+}
+
+/// Window frame for a notice pill of `chars` characters: (x, y, width), the
+/// same vertical spot and centre as the circle, height unchanged.
+pub fn notice_frame(
+    area: WorkArea,
+    scale: f64,
+    placement: HudPlacement,
+    chars: usize,
+) -> (i32, i32, i32) {
+    let logical = (chars as f64 * NOTICE_CHAR_PX + NOTICE_PADDING_PX).min(NOTICE_MAX_PX);
+    let width = (logical * scale).round() as i32;
+    let size = (SIZE * scale).round() as i32;
+    let (_, y) = placed(area, size, scale, placement);
+    (area.x + ((area.width - width) / 2).max(0), y, width)
+}
+
+/// Mic blocks in, a 0…1 level out about twelve times a second (Mac
+/// `AudioLevelMeter`): hex's auto level learns this microphone and this room
+/// and is kept across takes; only the output starts at rest on a new take.
+#[derive(Debug, Default)]
+pub struct LevelFeed {
+    auto: AutoLevel,
+    /// Seconds of audio since the last emitted level.
+    pending: f32,
+    started: bool,
+}
+
+impl LevelFeed {
+    /// One level per this much audio.
+    const INTERVAL: f32 = 1.0 / 12.0;
+
+    pub fn restart(&mut self) {
+        self.pending = 0.0;
+        self.started = false;
+    }
+
+    /// Learns from a block of 16 kHz samples; Some(level) when it is time to
+    /// tell the page.
+    pub fn push(&mut self, samples: &[i16]) -> Option<f32> {
+        let dt = samples.len() as f32 / 16_000.0;
+        let level = self.auto.step(decibels(rms(samples)), dt.min(0.25));
+        self.pending += dt;
+        if self.started && self.pending + 1e-4 < Self::INTERVAL {
+            return None;
+        }
+        self.started = true;
+        self.pending = 0.0;
+        Some(level)
+    }
+}
+
+pub fn level_script(level: f32) -> String {
+    format!("window.sezishLevel&&window.sezishLevel({level:.3})")
+}
+
+/// Hands the page the numbers of one wave strength (`WaveIntensity`).
+pub fn wave_script(intensity: WaveIntensity) -> String {
+    format!(
+        "window.sezishWave&&window.sezishWave({})",
+        serde_json::json!({
+            "swing": intensity.swing(),
+            "base": intensity.base_frequency(),
+            "gain": intensity.speed_gain(),
+            "attack": seconds(intensity.attack()),
+            "release": seconds(intensity.release()),
+            "minScale": WaveIntensity::MINIMUM_SCALE,
+        })
+    )
+}
+
+/// f32 seconds as the short decimal they were written as, not 0.05000000074.
+fn seconds(value: f32) -> f64 {
+    (f64::from(value) * 1e4).round() / 1e4
+}
+
+pub fn notice_script(text: &str, duration_ms: u64, clickable: bool) -> String {
+    format!(
+        "window.sezishNotice&&window.sezishNotice({},{duration_ms},{clickable})",
+        serde_json::Value::String(text.to_owned())
+    )
 }
 
 /// JS that tells the page which phase to draw; a no-op until the page has loaded.
@@ -200,7 +331,10 @@ mod tests {
             height: 1040,
         };
         assert_eq!(placed(area, 72, 1.0, HudPlacement::Top), (924, 10));
-        assert_eq!(placed(area, 72, 1.0, HudPlacement::Bottom), origin(area, 72, 1.0));
+        assert_eq!(
+            placed(area, 72, 1.0, HudPlacement::Bottom),
+            origin(area, 72, 1.0)
+        );
         let shifted = WorkArea { y: 300, ..area };
         assert_eq!(placed(shifted, 144, 2.0, HudPlacement::Top), (888, 320));
     }
@@ -256,14 +390,44 @@ mod tests {
 
     #[test]
     fn scripts_pass_values_to_the_page() {
-        assert_eq!(level_script(0.5), "window.sezishLevel&&window.sezishLevel(0.500)");
+        assert_eq!(
+            level_script(0.5),
+            "window.sezishLevel&&window.sezishLevel(0.500)"
+        );
         assert_eq!(
             wave_script(sez_core::wave::WaveIntensity::Lively),
-            "window.sezishWave&&window.sezishWave({\"swing\":0.85,\"base\":1.3,\"gain\":1.2,\"attack\":0.05,\"release\":0.22,\"minScale\":0.25})"
+            "window.sezishWave&&window.sezishWave({\"attack\":0.05,\"base\":1.3,\"gain\":1.2,\"minScale\":0.25,\"release\":0.22,\"swing\":0.85})"
         );
         assert_eq!(
             notice_script("Текст в буфере — \"Ctrl+V\"", 2_000, false),
             "window.sezishNotice&&window.sezishNotice(\"Текст в буфере — \\\"Ctrl+V\\\"\",2000,false)"
+        );
+    }
+
+    /// Mac `hud*` strings, with Ctrl+V for ⌘V.
+    #[test]
+    fn notice_texts_follow_the_mac_wording() {
+        use crate::settings::AppLanguage;
+        use sez_core::feedback::HudNotice;
+        assert_eq!(
+            notice_text(HudNotice::PasteManually, AppLanguage::Ru),
+            "Текст в буфере — вставьте Ctrl+V"
+        );
+        assert_eq!(
+            notice_text(HudNotice::NoText, AppLanguage::Ru),
+            "Не расслышал — запись в истории"
+        );
+        assert_eq!(
+            notice_text(HudNotice::MicFailed, AppLanguage::Ru),
+            "Микрофон не записал — открыть настройки"
+        );
+        assert_eq!(
+            notice_text(HudNotice::ModelMissing, AppLanguage::Uz),
+            "Model yuklanmagan — sozlamalarni ochish"
+        );
+        assert_eq!(
+            notice_text(HudNotice::PasteManually, AppLanguage::Uz),
+            "Matn buferda — Ctrl+V bilan qoʼying"
         );
     }
 
@@ -278,7 +442,7 @@ mod tests {
             height: 1040,
         };
         let (x, y, width) = notice_frame(area, 1.0, HudPlacement::Bottom, 20);
-        assert_eq!(width, 20 * NOTICE_CHAR_PX as i32 + NOTICE_PADDING_PX as i32);
+        assert_eq!(width, (20.0 * NOTICE_CHAR_PX + NOTICE_PADDING_PX).round() as i32);
         assert_eq!(x, (1920 - width) / 2);
         assert_eq!(y, origin(area, 72, 1.0).1);
         let (_, _, capped) = notice_frame(area, 1.0, HudPlacement::Bottom, 500);
