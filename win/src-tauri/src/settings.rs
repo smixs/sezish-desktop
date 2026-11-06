@@ -152,6 +152,8 @@ mod tests {
         effective_transcription_mode, resolve_system_language, AppLanguage, AsrModel,
         HotkeyPreference, Settings, TranscriptionPreference,
     };
+    use crate::hud::HudPlacement;
+    use sez_core::wave::WaveIntensity;
     use sez_hotkey::{Modifiers, Shortcut};
     use std::fs;
     use tempfile::TempDir;
@@ -184,8 +186,41 @@ mod tests {
                 language: Some(AppLanguage::Uz),
                 play_sounds: false,
                 sound_volume: 50,
+                hud_placement: HudPlacement::Bottom,
+                wave_intensity: WaveIntensity::Lively,
             }
         );
+    }
+
+    /// Mac: HUD placement and wave intensity, stored by name; unknown names
+    /// (the Mac's notch, a typo) fall back to the defaults.
+    #[test]
+    fn hud_placement_and_wave_intensity_load_by_name() {
+        let directory = TempDir::new().expect("temporary directory should be created");
+        let path = directory.path().join("settings.json");
+        let defaults = Settings::default();
+        assert_eq!(defaults.hud_placement, HudPlacement::Bottom);
+        assert_eq!(defaults.wave_intensity, WaveIntensity::Lively);
+
+        fs::write(&path, r#"{ "hud_placement": "top", "wave_intensity": "bold" }"#)
+            .expect("fixture should be written");
+        let loaded = Settings::load(&path);
+        assert_eq!(loaded.hud_placement, HudPlacement::Top);
+        assert_eq!(loaded.wave_intensity, WaveIntensity::Bold);
+
+        fs::write(&path, r#"{ "hud_placement": "notch", "wave_intensity": 3 }"#)
+            .expect("fixture should be written");
+        let loaded = Settings::load(&path);
+        assert_eq!(loaded.hud_placement, HudPlacement::Bottom);
+        assert_eq!(loaded.wave_intensity, WaveIntensity::Lively);
+
+        let saved = Settings {
+            hud_placement: HudPlacement::Top,
+            wave_intensity: WaveIntensity::Calm,
+            ..Default::default()
+        };
+        saved.save(&path).expect("settings should save");
+        assert_eq!(Settings::load(&path), saved);
     }
 
     /// Mac: `soundVolume` 0…1, default 0.5. Stored here as a percent so the
@@ -273,6 +308,8 @@ mod tests {
                 language: None,
                 play_sounds: true,
                 sound_volume: 50,
+                hud_placement: HudPlacement::Bottom,
+                wave_intensity: WaveIntensity::Lively,
             }
         );
     }

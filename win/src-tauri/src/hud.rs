@@ -189,4 +189,99 @@ mod tests {
             "window.sezishPhase&&window.sezishPhase('idle')"
         );
     }
+
+    #[test]
+    fn the_top_placement_sits_just_under_the_screen_edge() {
+        // Mac `HUDGeometry.topGap` = 10 pt; Windows has no menu bar above it.
+        let area = WorkArea {
+            x: 0,
+            y: 0,
+            width: 1920,
+            height: 1040,
+        };
+        assert_eq!(placed(area, 72, 1.0, HudPlacement::Top), (924, 10));
+        assert_eq!(placed(area, 72, 1.0, HudPlacement::Bottom), origin(area, 72, 1.0));
+        let shifted = WorkArea { y: 300, ..area };
+        assert_eq!(placed(shifted, 144, 2.0, HudPlacement::Top), (888, 320));
+    }
+
+    #[test]
+    fn placements_have_stable_names_for_settings() {
+        assert_eq!(HudPlacement::default(), HudPlacement::Bottom);
+        for placement in [HudPlacement::Bottom, HudPlacement::Top] {
+            assert_eq!(HudPlacement::from_name(placement.name()), Some(placement));
+        }
+        assert_eq!(HudPlacement::from_name("notch"), None);
+    }
+
+    /// The mic tap delivers ~10 ms blocks; the page gets a level ~12 times a
+    /// second, like the Mac meter.
+    #[test]
+    fn the_level_feed_emits_about_twelve_times_a_second() {
+        let mut feed = LevelFeed::default();
+        let block = vec![4_000i16; 160]; // 10 ms
+        let emitted = (0..100).filter_map(|_| feed.push(&block)).count();
+        assert!((11..=13).contains(&emitted), "{emitted}");
+    }
+
+    #[test]
+    fn the_level_feed_tells_speech_from_the_room() {
+        let mut feed = LevelFeed::default();
+        let speech: Vec<i16> = (0..1_360)
+            .map(|i| (6_000.0 * (i as f32 * 0.35).sin()) as i16)
+            .collect();
+        let room = vec![20i16; 1_360];
+        let mut last_speech = 0.0;
+        let mut last_room = 1.0;
+        for _ in 0..24 {
+            if let Some(level) = feed.push(&speech) {
+                last_speech = level;
+            }
+            if let Some(level) = feed.push(&room) {
+                last_room = level;
+            }
+        }
+        assert!(last_speech > 0.8, "{last_speech}");
+        assert!(last_room < 0.1, "{last_room}");
+    }
+
+    #[test]
+    fn a_new_take_starts_the_level_at_rest() {
+        let mut feed = LevelFeed::default();
+        feed.push(&vec![8_000i16; 1_360]);
+        feed.restart();
+        let first = feed.push(&vec![0i16; 1_360]).expect("first block emits");
+        assert_eq!(first, 0.0);
+    }
+
+    #[test]
+    fn scripts_pass_values_to_the_page() {
+        assert_eq!(level_script(0.5), "window.sezishLevel&&window.sezishLevel(0.500)");
+        assert_eq!(
+            wave_script(sez_core::wave::WaveIntensity::Lively),
+            "window.sezishWave&&window.sezishWave({\"swing\":0.85,\"base\":1.3,\"gain\":1.2,\"attack\":0.05,\"release\":0.22,\"minScale\":0.25})"
+        );
+        assert_eq!(
+            notice_script("Текст в буфере — \"Ctrl+V\"", 2_000, false),
+            "window.sezishNotice&&window.sezishNotice(\"Текст в буфере — \\\"Ctrl+V\\\"\",2000,false)"
+        );
+    }
+
+    /// The pill needs room the 72 px circle does not: the window widens to the
+    /// text and stays centred where the circle was.
+    #[test]
+    fn the_notice_window_widens_around_the_same_centre() {
+        let area = WorkArea {
+            x: 0,
+            y: 0,
+            width: 1920,
+            height: 1040,
+        };
+        let (x, y, width) = notice_frame(area, 1.0, HudPlacement::Bottom, 20);
+        assert_eq!(width, 20 * NOTICE_CHAR_PX as i32 + NOTICE_PADDING_PX as i32);
+        assert_eq!(x, (1920 - width) / 2);
+        assert_eq!(y, origin(area, 72, 1.0).1);
+        let (_, _, capped) = notice_frame(area, 1.0, HudPlacement::Bottom, 500);
+        assert_eq!(capped, NOTICE_MAX_PX as i32);
+    }
 }
