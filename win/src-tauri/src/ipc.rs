@@ -291,6 +291,24 @@ fn parse_language(language: &str) -> Result<AppLanguage, AppError> {
 
 #[cfg(test)]
 mod tests {
+    use super::{parse_hud_placement, parse_wave_intensity};
+    use crate::hud::HudPlacement;
+    use sez_core::wave::WaveIntensity;
+
+    /// The settings window sends the stored names; the Mac's menu-bar and notch
+    /// places do not exist here.
+    #[test]
+    fn hud_placement_and_wave_intensity_parse_by_stored_name() {
+        assert_eq!(parse_hud_placement("top").unwrap(), HudPlacement::Top);
+        assert_eq!(parse_hud_placement("bottom").unwrap(), HudPlacement::Bottom);
+        assert!(parse_hud_placement("notch").is_err());
+        assert_eq!(parse_wave_intensity("bold").unwrap(), WaveIntensity::Bold);
+        assert!(parse_wave_intensity("loud").is_err());
+    }
+}
+
+#[cfg(test)]
+mod shortcut_tests {
     use super::parse_shortcut;
     use sez_hotkey::{vk, Modifiers, Shortcut};
 

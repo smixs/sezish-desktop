@@ -456,7 +456,6 @@ impl AppController {
         self.settings().await
     }
 
-    /// Saved and heard at once, like the Mac slider on release.
     /// A new key or model is a new engine even when the mode stays OpenAI.
     pub async fn set_openai(
         &self,
@@ -505,6 +504,7 @@ impl AppController {
         self.settings().await
     }
 
+    /// Saved and heard at once, like the Mac slider on release.
     pub async fn set_sound_volume(&self, percent: u8) -> Result<SettingsDto, AppError> {
         {
             let mut runtime = self.runtime.lock().await;
