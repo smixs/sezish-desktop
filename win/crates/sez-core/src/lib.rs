@@ -2,6 +2,7 @@ use async_trait::async_trait;
 use std::time::Duration;
 use thiserror::Error;
 
+pub mod feedback;
 pub mod wav;
 
 /// Errors shared by the frozen adapter seams.
@@ -264,6 +265,14 @@ mod tests {
     use std::time::Duration;
 
     type EventLog = Arc<Mutex<Vec<&'static str>>>;
+
+    /// Speech-loud audio: a 220 Hz tone at about -12 dBFS. A constant fixture is
+    /// pure offset, and the silence gate rightly drops it before transcription.
+    fn voiced(count: usize) -> Vec<i16> {
+        (0..count)
+            .map(|i| (8_000.0 * (i as f32 * 220.0 * std::f32::consts::TAU / 16_000.0).sin()) as i16)
+            .collect()
+    }
 
     struct MockMic {
         calls: Arc<Mutex<MicCalls>>,
@@ -530,7 +539,7 @@ mod tests {
     #[tokio::test]
     async fn begin_is_rejected_while_recording_or_processing_without_side_effects() {
         for state in [State::Recording, State::Processing] {
-            let mut rig = Rig::new(vec![1; 4_800], Ok("salom".to_owned()));
+            let mut rig = Rig::new(voiced(4_800), Ok("salom".to_owned()));
             rig.coordinator.state = state;
 
             rig.coordinator.begin().await;
@@ -543,7 +552,7 @@ mod tests {
     #[tokio::test]
     async fn end_is_ignored_outside_recording_without_side_effects() {
         for state in [State::Idle, State::Processing] {
-            let mut rig = Rig::new(vec![1; 4_800], Ok("salom".to_owned()));
+            let mut rig = Rig::new(voiced(4_800), Ok("salom".to_owned()));
             rig.coordinator.state = state;
 
             let outcome = rig.coordinator.end().await;
@@ -596,7 +605,7 @@ mod tests {
 
     #[tokio::test]
     async fn empty_transcript_keeps_captured_audio_in_history_with_empty_text() {
-        let samples = vec![7; 4_800];
+        let samples = voiced(4_800);
         let mut rig = Rig::new(samples.clone(), Ok(String::new()));
         rig.coordinator.begin().await;
 
@@ -628,7 +637,7 @@ mod tests {
 
     #[tokio::test]
     async fn transcription_error_keeps_captured_audio_in_history_with_empty_text() {
-        let samples = vec![8; 4_800];
+        let samples = voiced(4_800);
         let mut rig = Rig::new(
             samples.clone(),
             Err(SezError::Other("transcription failed".to_owned())),
@@ -656,7 +665,7 @@ mod tests {
 
     #[tokio::test]
     async fn history_is_recorded_before_insert_and_survives_insert_failure() {
-        let samples = vec![9; 4_800];
+        let samples = voiced(4_800);
         let mut rig = Rig::new(samples.clone(), Ok("salom".to_owned()));
         rig.inserter
             .lock()
@@ -698,7 +707,7 @@ mod tests {
 
     #[tokio::test]
     async fn successful_dictation_is_recorded_then_inserted() {
-        let samples = vec![10; 4_800];
+        let samples = voiced(4_800);
         let mut rig = Rig::new(samples.clone(), Ok("matn".to_owned()));
         rig.coordinator.begin().await;
         rig.clear_events();
@@ -728,9 +737,30 @@ mod tests {
         );
     }
 
+    /// hex's silence gate: a take with no speech in it never reaches the engine,
+    /// which would invent a closing phrase, and leaves nothing in history.
+    #[tokio::test]
+    async fn a_near_silent_take_is_dropped_before_transcription() {
+        let mut rig = Rig::new(vec![3; 16_000], Ok("Спасибо.".to_owned()));
+        rig.coordinator.begin().await;
+        rig.clear_events();
+
+        let outcome = rig.coordinator.end().await;
+
+        assert_eq!(outcome, Outcome::Ignored);
+        assert_eq!(rig.coordinator.state(), State::Idle);
+        assert_eq!(
+            rig.events
+                .lock()
+                .expect("event log mutex poisoned")
+                .as_slice(),
+            ["mic.stop"]
+        );
+    }
+
     #[tokio::test]
     async fn mic_start_error_returns_to_idle_without_downstream_side_effects() {
-        let mut rig = Rig::new(vec![1; 4_800], Ok("salom".to_owned()));
+        let mut rig = Rig::new(voiced(4_800), Ok("salom".to_owned()));
         rig.mic
             .lock()
             .expect("mic calls mutex poisoned")
@@ -771,7 +801,7 @@ mod tests {
 
     #[tokio::test]
     async fn mic_stop_error_returns_failed_and_keeps_no_history() {
-        let mut rig = Rig::new(vec![1; 4_800], Ok("salom".to_owned()));
+        let mut rig = Rig::new(voiced(4_800), Ok("salom".to_owned()));
         rig.mic
             .lock()
             .expect("mic calls mutex poisoned")
@@ -800,7 +830,7 @@ mod tests {
 
     #[tokio::test]
     async fn cancel_stops_mic_and_discards_samples_without_downstream_calls() {
-        let mut rig = Rig::new(vec![11; 4_800], Ok("salom".to_owned()));
+        let mut rig = Rig::new(voiced(4_800), Ok("salom".to_owned()));
         rig.coordinator.begin().await;
         rig.clear_events();
 
@@ -840,7 +870,7 @@ mod tests {
     #[tokio::test]
     async fn cancel_is_a_no_op_outside_recording() {
         for state in [State::Idle, State::Processing] {
-            let mut rig = Rig::new(vec![1; 4_800], Ok("salom".to_owned()));
+            let mut rig = Rig::new(voiced(4_800), Ok("salom".to_owned()));
             rig.coordinator.state = state;
 
             rig.coordinator.cancel().await;
@@ -852,7 +882,7 @@ mod tests {
 
     #[tokio::test]
     async fn warmup_is_called_exactly_once_per_successful_begin() {
-        let mut rig = Rig::new(vec![1; 4_800], Ok("salom".to_owned()));
+        let mut rig = Rig::new(voiced(4_800), Ok("salom".to_owned()));
 
         rig.coordinator.begin().await;
         rig.coordinator.begin().await;
