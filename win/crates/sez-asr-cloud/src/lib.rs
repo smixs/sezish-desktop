@@ -1,3 +1,4 @@
+pub mod openai;
 use reqwest::Client;
 use serde::Deserialize;
 use sez_core::{SezError, Transcriber};
