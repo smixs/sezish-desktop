@@ -47,6 +47,7 @@ fn run() -> tauri::Result<()> {
             ipc::set_language,
             ipc::set_play_sounds,
             ipc::set_sound_volume,
+            ipc::set_openai,
             ipc::hud_notice_clicked,
             ipc::set_autostart,
             ipc::recent_dictations,

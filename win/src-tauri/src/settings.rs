@@ -19,6 +19,32 @@ pub enum HotkeyPreference {
 pub enum TranscriptionPreference {
     Cloud,
     Local,
+    /// The user's own OpenAI key (Mac `.openai`).
+    Openai,
+}
+
+/// Mac `OpenAIModel`, stored by its API name.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum OpenAiModel {
+    #[default]
+    Transcribe,
+    /// OpenAI shuts it down on 2027-02-26: drop the case then.
+    Mini,
+}
+
+impl OpenAiModel {
+    pub const ALL: [Self; 2] = [Self::Transcribe, Self::Mini];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Transcribe => "gpt-transcribe",
+            Self::Mini => "gpt-4o-mini-transcribe",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|model| model.name() == name)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -46,6 +72,12 @@ pub struct Settings {
     pub hud_placement: HudPlacement,
     #[serde(with = "by_name::intensity", default)]
     pub wave_intensity: WaveIntensity,
+    /// Kept trimmed; set through `set_openai_api_key`. Plain in settings.json, as the
+    /// Mac keeps it in its defaults.
+    #[serde(default)]
+    pub openai_api_key: Option<String>,
+    #[serde(with = "by_name::openai_model", default)]
+    pub openai_model: OpenAiModel,
 }
 
 /// Stored by name, read back leniently: an unknown name is the default.
@@ -76,6 +108,7 @@ mod by_name {
     }
     named!(placement, crate::hud::HudPlacement);
     named!(intensity, sez_core::wave::WaveIntensity);
+    named!(openai_model, crate::settings::OpenAiModel);
 }
 
 fn default_sound_volume() -> u8 {
@@ -94,6 +127,8 @@ impl Default for Settings {
             sound_volume: default_sound_volume(),
             hud_placement: HudPlacement::Bottom,
             wave_intensity: WaveIntensity::Lively,
+            openai_api_key: None,
+            openai_model: OpenAiModel::Transcribe,
         }
     }
 }
@@ -159,7 +194,23 @@ impl Settings {
         {
             settings.wave_intensity = intensity;
         }
+        if let Some(key) = value.get("openai_api_key").and_then(Value::as_str) {
+            settings.set_openai_api_key(key);
+        }
+        if let Some(model) = value
+            .get("openai_model")
+            .and_then(Value::as_str)
+            .and_then(OpenAiModel::from_name)
+        {
+            settings.openai_model = model;
+        }
         settings
+    }
+
+    /// A pasted key: surrounding whitespace goes, an empty field means no key.
+    pub fn set_openai_api_key(&mut self, raw: &str) {
+        let trimmed = raw.trim();
+        self.openai_api_key = (!trimmed.is_empty()).then(|| trimmed.to_owned());
     }
 
     pub fn save(&self, path: &Path) -> Result<(), std::io::Error> {
@@ -178,15 +229,23 @@ pub fn settings_path() -> PathBuf {
         .join("settings.json")
 }
 
+/// Mac `effectiveTranscriptionMode`: a mode that cannot run falls back to the cloud
+/// when it is baked in, otherwise to local.
 pub fn effective_transcription_mode(
     preference: TranscriptionPreference,
     has_cloud_credentials: bool,
+    has_openai_key: bool,
 ) -> TranscriptionPreference {
-    match (preference, has_cloud_credentials) {
-        (TranscriptionPreference::Cloud, true) => TranscriptionPreference::Cloud,
-        (TranscriptionPreference::Cloud, false) | (TranscriptionPreference::Local, _) => {
-            TranscriptionPreference::Local
-        }
+    let fallback = if has_cloud_credentials {
+        TranscriptionPreference::Cloud
+    } else {
+        TranscriptionPreference::Local
+    };
+    match preference {
+        TranscriptionPreference::Local => TranscriptionPreference::Local,
+        TranscriptionPreference::Cloud => fallback,
+        TranscriptionPreference::Openai if has_openai_key => TranscriptionPreference::Openai,
+        TranscriptionPreference::Openai => fallback,
     }
 }
 
@@ -369,6 +428,8 @@ mod tests {
                 sound_volume: 50,
                 hud_placement: HudPlacement::Bottom,
                 wave_intensity: WaveIntensity::Lively,
+                openai_api_key: None,
+                openai_model: OpenAiModel::Transcribe,
             }
         );
     }

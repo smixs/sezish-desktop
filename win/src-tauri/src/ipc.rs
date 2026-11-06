@@ -3,7 +3,7 @@ use crate::dto::{
     DictationEntryDto, DictationOutcomeDto, ModelStatusDto, SettingsDto, UpdateCheckDto,
 };
 use crate::error::AppError;
-use crate::settings::{AppLanguage, HotkeyPreference, TranscriptionPreference};
+use crate::settings::{AppLanguage, HotkeyPreference, OpenAiModel, TranscriptionPreference};
 use sez_asr_local::AsrModel;
 use sez_hotkey::{vk, Shortcut};
 use std::sync::Arc;
@@ -87,6 +87,22 @@ pub async fn set_play_sounds(
 #[tauri::command]
 pub fn hud_notice_clicked(app: tauri::AppHandle) {
     crate::open_settings_window(&app);
+}
+
+#[tauri::command]
+pub async fn set_openai(
+    controller: State<'_, Arc<AppController>>,
+    key: Option<String>,
+    model: Option<String>,
+) -> Result<SettingsDto, AppError> {
+    let model = model
+        .as_deref()
+        .map(|name| {
+            OpenAiModel::from_name(name)
+                .ok_or_else(|| AppError::invalid(format!("unknown OpenAI model {name}")))
+        })
+        .transpose()?;
+    controller.set_openai(key, model).await
 }
 
 #[tauri::command]
@@ -236,8 +252,9 @@ fn parse_transcription_mode(mode: &str) -> Result<TranscriptionPreference, AppEr
     match mode {
         "cloud" => Ok(TranscriptionPreference::Cloud),
         "local" => Ok(TranscriptionPreference::Local),
+        "openai" => Ok(TranscriptionPreference::Openai),
         _ => Err(AppError::invalid(
-            "transcription mode must be either \"cloud\" or \"local\"",
+            "transcription mode must be \"cloud\", \"local\" or \"openai\"",
         )),
     }
 }

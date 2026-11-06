@@ -201,8 +201,13 @@ impl TrayUi {
             let _ = item.set_checked(choice == model);
             let _ = item.set_enabled(effective_mode == TranscriptionPreference::Local);
         }
-        if effective_mode == TranscriptionPreference::Cloud {
-            let _ = self.model.set_text("Transcription: Cloud");
+        let remote = match effective_mode {
+            TranscriptionPreference::Cloud => Some("Transcription: Cloud"),
+            TranscriptionPreference::Openai => Some("Transcription: OpenAI"),
+            TranscriptionPreference::Local => None,
+        };
+        if let Some(remote) = remote {
+            let _ = self.model.set_text(remote);
             let _ = self.model.set_enabled(false);
             return;
         }

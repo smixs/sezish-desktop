@@ -10,10 +10,11 @@ use crate::platform::{
 };
 use crate::settings::{
     effective_transcription_mode, resolve_system_language, settings_path, AppLanguage,
-    HotkeyPreference, Settings, TranscriptionPreference,
+    HotkeyPreference, OpenAiModel, Settings, TranscriptionPreference,
 };
 use crate::tray::{TrayPhase, TrayUi};
 use async_trait::async_trait;
+use sez_asr_cloud::openai::OpenAiTranscriber;
 use sez_asr_cloud::CloudTranscriber;
 use sez_asr_local::{AsrModel, LocalTranscriber, ModelDownloader, ModelStore};
 use sez_audio::CpalMic;
@@ -37,6 +38,7 @@ type AppCoordinator = Coordinator<CpalMic, ActiveTranscriber, PlatformInserter, 
 enum ActiveTranscriber {
     Cloud(CloudTranscriber),
     Local(LocalTranscriber),
+    OpenAi(OpenAiTranscriber),
 }
 
 #[async_trait]
@@ -45,6 +47,7 @@ impl Transcriber for ActiveTranscriber {
         match self {
             Self::Cloud(transcriber) => transcriber.warmup(),
             Self::Local(transcriber) => transcriber.warmup(),
+            Self::OpenAi(transcriber) => transcriber.warmup(),
         }
     }
 
@@ -52,6 +55,7 @@ impl Transcriber for ActiveTranscriber {
         match self {
             Self::Cloud(transcriber) => Transcriber::transcribe(transcriber, samples).await,
             Self::Local(transcriber) => Transcriber::transcribe(transcriber, samples).await,
+            Self::OpenAi(transcriber) => Transcriber::transcribe(transcriber, samples).await,
         }
     }
 }
@@ -449,6 +453,30 @@ impl AppController {
     }
 
     /// Saved and heard at once, like the Mac slider on release.
+    /// A new key or model is a new engine even when the mode stays OpenAI.
+    pub async fn set_openai(
+        &self,
+        key: Option<String>,
+        model: Option<OpenAiModel>,
+    ) -> Result<SettingsDto, AppError> {
+        {
+            let mut runtime = self.runtime.lock().await;
+            if let Some(key) = key {
+                runtime.settings.set_openai_api_key(&key);
+            }
+            if let Some(model) = model {
+                runtime.settings.openai_model = model;
+            }
+            runtime.settings.save(&self.settings_path)?;
+            if runtime.coordinator_mode == Some(TranscriptionPreference::Openai) {
+                runtime.coordinator_mode = None;
+            }
+            self.apply_pending_mode_locked(&mut runtime)?;
+        }
+        self.refresh_model_menu().await;
+        self.settings().await
+    }
+
     pub async fn set_sound_volume(&self, percent: u8) -> Result<SettingsDto, AppError> {
         {
             let mut runtime = self.runtime.lock().await;
@@ -593,11 +621,16 @@ impl AppController {
         let _ = result;
     }
 
-    fn settings_dto(&self, settings: &Settings) -> Result<SettingsDto, AppError> {
-        let effective = effective_transcription_mode(
+    fn effective_mode(&self, settings: &Settings) -> TranscriptionPreference {
+        effective_transcription_mode(
             settings.transcription_mode,
             self.cloud_credentials.is_some(),
-        );
+            settings.openai_api_key.is_some(),
+        )
+    }
+
+    fn settings_dto(&self, settings: &Settings) -> Result<SettingsDto, AppError> {
+        let effective = self.effective_mode(&settings);
         let resolved = settings
             .language
             .unwrap_or_else(|| resolve_system_language(&system_locale()));
@@ -611,6 +644,8 @@ impl AppController {
             resolved_language: resolved,
             play_sounds: settings.play_sounds,
             sound_volume: settings.sound_volume,
+            openai_api_key_set: settings.openai_api_key.is_some(),
+            openai_model: settings.openai_model.name(),
             autostart_enabled: autostart_enabled()?,
         })
     }
@@ -623,10 +658,7 @@ impl AppController {
         {
             return Ok(());
         }
-        let effective = effective_transcription_mode(
-            runtime.settings.transcription_mode,
-            self.cloud_credentials.is_some(),
-        );
+        let effective = self.effective_mode(&runtime.settings);
         let transcriber = match effective {
             TranscriptionPreference::Cloud => {
                 let credentials = self.cloud_credentials.as_ref().ok_or_else(|| {
@@ -635,6 +667,15 @@ impl AppController {
                 ActiveTranscriber::Cloud(CloudTranscriber::new(
                     credentials.endpoint.clone(),
                     credentials.key.clone(),
+                ))
+            }
+            TranscriptionPreference::Openai => {
+                let key = runtime.settings.openai_api_key.clone().ok_or_else(|| {
+                    AppError::not_ready("OpenAI key is not set")
+                })?;
+                ActiveTranscriber::OpenAi(OpenAiTranscriber::new(
+                    key,
+                    runtime.settings.openai_model.name(),
                 ))
             }
             TranscriptionPreference::Local if !self.model_store().is_ready() => {
@@ -684,7 +725,7 @@ impl AppController {
             }
         };
 
-        if effective == TranscriptionPreference::Cloud {
+        if effective != TranscriptionPreference::Local {
             lock_recover(&self.model_idle).mark_unloaded();
         }
         let clock: Arc<dyn Clock> = self.clock.clone();
@@ -693,7 +734,7 @@ impl AppController {
         // speaking, so releasing the hotkey only leaves the tail to transcribe.
         let local = match &transcriber {
             ActiveTranscriber::Local(local) => Some(local.clone()),
-            ActiveTranscriber::Cloud(_) => None,
+            ActiveTranscriber::Cloud(_) | ActiveTranscriber::OpenAi(_) => None,
         };
         let level = self.level.clone();
         let armed = self.capture_armed.clone();
@@ -722,10 +763,7 @@ impl AppController {
     }
 
     fn apply_pending_mode_locked(&self, runtime: &mut RuntimeState) -> Result<(), AppError> {
-        let desired = effective_transcription_mode(
-            runtime.settings.transcription_mode,
-            self.cloud_credentials.is_some(),
-        );
+        let desired = self.effective_mode(&runtime.settings);
         let idle = runtime
             .coordinator
             .as_ref()
@@ -888,10 +926,7 @@ impl AppController {
         let (effective, model, language) = {
             let runtime = self.runtime.lock().await;
             (
-                effective_transcription_mode(
-                    runtime.settings.transcription_mode,
-                    self.cloud_credentials.is_some(),
-                ),
+                self.effective_mode(&runtime.settings),
                 runtime.settings.local_model,
                 runtime
                     .settings

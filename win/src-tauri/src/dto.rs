@@ -14,6 +14,9 @@ pub struct SettingsDto {
     pub resolved_language: AppLanguage,
     pub play_sounds: bool,
     pub sound_volume: u8,
+    /// The key itself stays in the backend; the UI only learns whether one is set.
+    pub openai_api_key_set: bool,
+    pub openai_model: &'static str,
     pub autostart_enabled: bool,
 }
 
