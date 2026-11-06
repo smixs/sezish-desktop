@@ -196,7 +196,7 @@ const fixture = {
     { text: "Ertaga soat oʼnda qoʼngʼiroq bor.", recorded_at: now - 90_000 }
   ],
   modelStatus: { kind: "ready" },
-  version: "0.1.10-preview"
+  version: "0.1.11-preview"
 };
 
 const GEMINI_IN_RELEASE = false;
