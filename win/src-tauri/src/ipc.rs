@@ -136,6 +136,11 @@ pub async fn set_wave_intensity(
         .await
 }
 
+#[tauri::command]
+pub fn open_key_page(provider: String) -> Result<(), AppError> {
+    crate::platform::open_url(key_page(&provider)?)
+}
+
 /// «Выйти из sezish» at the foot of the settings sidebar, as on the Mac.
 #[tauri::command]
 pub fn quit_app(app: tauri::AppHandle) {
@@ -307,6 +312,17 @@ fn parse_local_model(model: &str) -> Result<AsrModel, AppError> {
     }
 }
 
+/// Where «Получить ключ» leads (Mac `RecognitionPane`).
+fn key_page(provider: &str) -> Result<&'static str, AppError> {
+    match provider {
+        "gemini" => Ok("https://aistudio.google.com/apikey"),
+        "openai" => Ok("https://platform.openai.com/api-keys"),
+        _ => Err(AppError::invalid(format!(
+            "unknown key provider {provider}"
+        ))),
+    }
+}
+
 fn parse_hud_placement(name: &str) -> Result<HudPlacement, AppError> {
     HudPlacement::from_name(name)
         .ok_or_else(|| AppError::invalid(format!("unknown HUD placement {name}")))
@@ -334,8 +350,14 @@ mod tests {
     /// «Получить ключ» opens one of two fixed pages, never a URL from the window.
     #[test]
     fn key_pages_are_fixed_per_provider() {
-        assert_eq!(key_page("gemini").unwrap(), "https://aistudio.google.com/apikey");
-        assert_eq!(key_page("openai").unwrap(), "https://platform.openai.com/api-keys");
+        assert_eq!(
+            key_page("gemini").unwrap(),
+            "https://aistudio.google.com/apikey"
+        );
+        assert_eq!(
+            key_page("openai").unwrap(),
+            "https://platform.openai.com/api-keys"
+        );
         assert!(key_page("https://example.com").is_err());
     }
     use crate::hud::HudPlacement;

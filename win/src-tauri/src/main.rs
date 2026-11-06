@@ -52,6 +52,7 @@ fn run() -> tauri::Result<()> {
             ipc::set_hud_placement,
             ipc::set_wave_intensity,
             ipc::quit_app,
+            ipc::open_key_page,
             ipc::hud_notice_clicked,
             ipc::set_autostart,
             ipc::recent_dictations,
@@ -153,11 +154,21 @@ pub(crate) fn open_settings_window(app: &tauri::AppHandle) {
         let _ = window.set_focus();
         return;
     }
-    let _ = WebviewWindowBuilder::new(app, "settings", WebviewUrl::App("index.html".into()))
-        .title("sezish settings")
-        .inner_size(520.0, 440.0)
+    // Mac proportions (720–1100 × 500–580); Mica shows through the sidebar, which
+    // the page leaves transparent, and follows the system light or dark theme.
+    let builder = WebviewWindowBuilder::new(app, "settings", WebviewUrl::App("index.html".into()))
+        .title("sezish")
+        .inner_size(800.0, 580.0)
+        .min_inner_size(720.0, 500.0)
         .resizable(true)
-        .build();
+        .effects(tauri::utils::config::WindowEffectsConfig {
+            effects: vec![tauri::window::Effect::Mica],
+            ..Default::default()
+        });
+    // Gated out of the macOS dev build, as in the HUD.
+    #[cfg(not(target_os = "macos"))]
+    let builder = builder.transparent(true);
+    let _ = builder.build();
 }
 
 #[cfg(test)]

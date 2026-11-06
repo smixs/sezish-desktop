@@ -108,6 +108,21 @@ pub fn open_history_folder(path: &Path) -> Result<(), AppError> {
         .map_err(|error| AppError::platform(error.to_string()))
 }
 
+/// The default browser, through the shell like the history folder.
+#[cfg(windows)]
+pub fn open_url(url: &str) -> Result<(), AppError> {
+    std::process::Command::new("explorer.exe")
+        .arg(url)
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| AppError::platform(error.to_string()))
+}
+
+#[cfg(not(windows))]
+pub fn open_url(_url: &str) -> Result<(), AppError> {
+    Ok(())
+}
+
 #[cfg(not(windows))]
 pub fn open_history_folder(_path: &Path) -> Result<(), AppError> {
     Ok(())
