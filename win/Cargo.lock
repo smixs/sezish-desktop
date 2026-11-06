@@ -3626,6 +3626,7 @@ name = "sez-asr-cloud"
 version = "0.0.1"
 dependencies = [
  "async-trait",
+ "base64 0.22.1",
  "httpmock",
  "reqwest 0.12.28",
  "serde",
