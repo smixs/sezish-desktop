@@ -206,6 +206,7 @@ fn manual_paste_error() -> SezError {
     )
 }
 
+pub mod guard;
 mod typing;
 #[cfg(windows)]
 mod windows;
