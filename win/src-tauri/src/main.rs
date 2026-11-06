@@ -57,6 +57,8 @@ fn run() -> tauri::Result<()> {
             ipc::set_autostart,
             ipc::recent_dictations,
             ipc::copy_dictation,
+            ipc::history_entries,
+            ipc::copy_history_entry,
             ipc::model_download_status,
             ipc::download_model,
             ipc::start_dictation,

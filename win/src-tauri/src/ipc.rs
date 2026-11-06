@@ -179,6 +179,21 @@ pub async fn copy_dictation(
 }
 
 #[tauri::command]
+pub async fn history_entries(
+    controller: State<'_, Arc<AppController>>,
+) -> Result<Vec<DictationEntryDto>, AppError> {
+    controller.history_entries().await
+}
+
+#[tauri::command]
+pub async fn copy_history_entry(
+    controller: State<'_, Arc<AppController>>,
+    index: u32,
+) -> Result<(), AppError> {
+    controller.copy_history_entry(index).await
+}
+
+#[tauri::command]
 pub fn model_download_status(
     controller: State<'_, Arc<AppController>>,
 ) -> Result<ModelStatusDto, AppError> {

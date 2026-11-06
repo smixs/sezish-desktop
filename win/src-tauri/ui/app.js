@@ -645,7 +645,7 @@ async function fixtureInvoke(command, args = {}) {
       return reply();
     case "begin_hotkey_capture":
     case "end_hotkey_capture":
-    case "copy_dictation":
+    case "copy_history_entry":
     case "open_history_folder":
     case "open_key_page":
     case "quit_app":
@@ -684,7 +684,7 @@ async function fixtureInvoke(command, args = {}) {
       if (args.key !== null && args.key !== undefined) settings.openai_api_key_set = args.key.trim() !== "";
       if (args.model) settings.openai_model = args.model;
       return reply();
-    case "recent_dictations":
+    case "history_entries":
       return state.history.map((entry) => ({ ...entry }));
     case "model_download_status":
       if (state.modelStatus.kind === "downloading") {
@@ -1038,7 +1038,7 @@ function bindKeyField(provider) {
 async function copyDictation(index) {
   setError("history", null);
   try {
-    await invoke("copy_dictation", { index });
+    await invoke("copy_history_entry", { index });
     state.copiedIndex = index;
     renderHistory();
     window.setTimeout(() => {
@@ -1092,7 +1092,7 @@ async function downloadModel() {
 
 async function refreshHistory() {
   try {
-    const history = await invoke("recent_dictations");
+    const history = await invoke("history_entries");
     state.history = Array.isArray(history) ? history : [];
     setError("history", null);
   } catch (error) {
@@ -1225,7 +1225,7 @@ async function loadInitialData() {
       (status) => (state.modelStatus = status),
       (error) => setError("model", error)
     ),
-    invoke("recent_dictations").then(
+    invoke("history_entries").then(
       (history) => (state.history = Array.isArray(history) ? history : []),
       (error) => setError("history", error)
     ),

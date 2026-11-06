@@ -77,12 +77,17 @@ impl SharedHistory {
     }
 
     async fn recent_three(&self) -> Result<Vec<DictationEntryDto>, AppError> {
+        self.newest(3).await
+    }
+
+    /// Newest first, as the store keeps them.
+    async fn newest(&self, limit: usize) -> Result<Vec<DictationEntryDto>, AppError> {
         let history = self.inner.lock().await;
         history
             .recent()
             .await?
             .into_iter()
-            .take(3)
+            .take(limit)
             .map(history_dto)
             .collect()
     }
@@ -561,6 +566,19 @@ impl AppController {
 
     pub async fn recent_dictations(&self) -> Result<Vec<DictationEntryDto>, AppError> {
         self.history.recent_three().await
+    }
+
+    /// Everything the store keeps, for the History page of the settings window.
+    pub async fn history_entries(&self) -> Result<Vec<DictationEntryDto>, AppError> {
+        self.history.newest(usize::MAX).await
+    }
+
+    pub async fn copy_history_entry(&self, index: u32) -> Result<(), AppError> {
+        let entries = self.history_entries().await?;
+        let entry = entries
+            .get(usize::try_from(index).map_err(|_| AppError::invalid("index is too large"))?)
+            .ok_or_else(|| AppError::invalid("history index is outside the list"))?;
+        copy_text(&entry.text)
     }
 
     pub async fn copy_dictation(&self, index: u32) -> Result<(), AppError> {
