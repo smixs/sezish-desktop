@@ -109,6 +109,9 @@ struct RuntimeState {
     settings: Settings,
     coordinator: Option<AppCoordinator>,
     coordinator_mode: Option<TranscriptionPreference>,
+    /// The local model the coordinator runs on, shared for «Распознать заново» so a
+    /// retry never loads a second copy. Dropped together with the coordinator.
+    local_engine: Option<LocalTranscriber>,
 }
 
 struct CloudCredentials {
@@ -169,6 +172,7 @@ impl AppController {
                 settings,
                 coordinator: None,
                 coordinator_mode: None,
+                local_engine: None,
             }),
             settings_path,
             history_path,
@@ -435,6 +439,7 @@ impl AppController {
                     .is_none_or(|coordinator| coordinator.state() == State::Idle);
                 if idle {
                     runtime.coordinator = None;
+                    runtime.local_engine = None;
                     runtime.coordinator_mode = None;
                     self.rebuild_locked(&mut runtime, false)?;
                 }
@@ -583,6 +588,88 @@ impl AppController {
             .get(usize::try_from(index).map_err(|_| AppError::invalid("index is too large"))?)
             .ok_or_else(|| AppError::invalid("history index is outside the list"))?;
         copy_text(&entry.text)
+    }
+
+    /// «Распознать заново» (Mac History): the take's audio through the engine chosen
+    /// now; the new text replaces the old one, and is copied to be pasted.
+    pub async fn retry_history_entry(&self, index: u32) -> Result<String, AppError> {
+        let index = usize::try_from(index).map_err(|_| AppError::invalid("index is too large"))?;
+        let samples = self.history.inner.lock().await.samples(index)?;
+        let transcriber = {
+            let mut runtime = self.runtime.lock().await;
+            let effective = self.effective_mode(&runtime.settings);
+            if effective == TranscriptionPreference::Local && runtime.local_engine.is_none() {
+                self.rebuild_locked(&mut runtime, true)?;
+            }
+            self.retry_transcriber(&runtime, effective)?
+        };
+        let text = match transcriber {
+            // The batch path: the dictation stream of the live coordinator stays untouched.
+            ActiveTranscriber::Local(local) => tauri::async_runtime::spawn_blocking(move || {
+                tauri::async_runtime::block_on(local.transcribe(&samples))
+            })
+            .await
+            .map_err(|error| AppError::internal(error.to_string()))?
+            .map_err(|error| AppError::platform(error.to_string()))?,
+            other => Transcriber::transcribe(&other, &samples)
+                .await
+                .map_err(|error| AppError::platform(error.to_string()))?,
+        };
+        let text = text.trim().to_owned();
+        if text.is_empty() {
+            return Err(AppError::invalid("no speech recognised in this take"));
+        }
+        self.history.inner.lock().await.update_text(index, &text)?;
+        copy_text(&text)?;
+        self.refresh_recent().await;
+        Ok(text)
+    }
+
+    fn retry_transcriber(
+        &self,
+        runtime: &RuntimeState,
+        effective: TranscriptionPreference,
+    ) -> Result<ActiveTranscriber, AppError> {
+        let settings = &runtime.settings;
+        Ok(match effective {
+            TranscriptionPreference::Cloud => {
+                let credentials = self.cloud_credentials.as_ref().ok_or_else(|| {
+                    AppError::not_ready("cloud credentials are unavailable in this build")
+                })?;
+                ActiveTranscriber::Cloud(CloudTranscriber::new(
+                    credentials.endpoint.clone(),
+                    credentials.key.clone(),
+                ))
+            }
+            TranscriptionPreference::Openai => ActiveTranscriber::OpenAi(OpenAiTranscriber::new(
+                settings.openai_api_key.clone().unwrap_or_default(),
+                settings.openai_model.name(),
+            )),
+            TranscriptionPreference::Gemini => {
+                let mode = if settings.gemini_smart_mode {
+                    GeminiMode::Smart
+                } else {
+                    GeminiMode::Verbatim
+                };
+                ActiveTranscriber::Gemini(GeminiTranscriber::new(
+                    settings.gemini_api_key.clone().unwrap_or_default(),
+                    mode,
+                ))
+            }
+            TranscriptionPreference::Local => ActiveTranscriber::Local(
+                runtime
+                    .local_engine
+                    .clone()
+                    .ok_or_else(|| AppError::not_ready("local model is not loaded"))?,
+            ),
+        })
+    }
+
+    /// «Послушать»: the take's WAV through the system player of short sounds.
+    pub async fn play_history_entry(&self, index: u32) -> Result<(), AppError> {
+        let index = usize::try_from(index).map_err(|_| AppError::invalid("index is too large"))?;
+        let path = self.history.inner.lock().await.audio_path(index)?;
+        crate::sounds::play_file(&path)
     }
 
     pub async fn copy_dictation(&self, index: u32) -> Result<(), AppError> {
@@ -891,12 +978,14 @@ impl AppController {
             }
             TranscriptionPreference::Local if !self.model_store().is_ready() => {
                 runtime.coordinator = None;
+                runtime.local_engine = None;
                 runtime.coordinator_mode = None;
                 self.set_model_status(ModelStatusDto::Missing);
                 return Ok(());
             }
             TranscriptionPreference::Local if !load_local => {
                 runtime.coordinator = None;
+                runtime.local_engine = None;
                 runtime.coordinator_mode = None;
                 return Ok(());
             }
@@ -929,6 +1018,7 @@ impl AppController {
                             message: message.clone(),
                         });
                         runtime.coordinator = None;
+                        runtime.local_engine = None;
                         runtime.coordinator_mode = None;
                         return Err(AppError::not_ready(message));
                     }
@@ -965,6 +1055,10 @@ impl AppController {
                 level.push(samples);
             }
         }));
+        runtime.local_engine = match &transcriber {
+            ActiveTranscriber::Local(local) => Some(local.clone()),
+            _ => None,
+        };
         runtime.coordinator = Some(Coordinator::new(
             mic,
             transcriber,
@@ -1075,6 +1169,7 @@ impl AppController {
         let idle_for = lock_recover(&self.model_idle).idle_for(self.clock.as_ref());
         if lock_recover(&self.model_idle).unload_if_idle(self.clock.as_ref()) {
             runtime.coordinator = None;
+            runtime.local_engine = None;
             runtime.coordinator_mode = None;
             crate::obs::log(&format!(
                 "model unload (idle {:.0}s)",

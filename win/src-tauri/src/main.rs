@@ -62,6 +62,8 @@ fn run() -> tauri::Result<()> {
             ipc::copy_dictation,
             ipc::history_entries,
             ipc::copy_history_entry,
+            ipc::retry_history_entry,
+            ipc::play_history_entry,
             ipc::model_download_status,
             ipc::download_model,
             ipc::start_dictation,

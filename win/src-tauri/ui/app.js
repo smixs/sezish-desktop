@@ -78,6 +78,9 @@ const strings = {
     yesterday: "Вчера",
     copy: "Скопировать",
     copied: "Скопировано",
+    listen: "Послушать",
+    retryTranscript: "Распознать заново",
+    retrying: "Распознаю…",
     previewMode: "Предпросмотр: sezish не запущен",
     dismiss: "Закрыть",
     previewUpdateStatus: "В предпросмотре обновлений нет"
@@ -157,6 +160,9 @@ const strings = {
     yesterday: "Kecha",
     copy: "Nusxalash",
     copied: "Nusxalandi",
+    listen: "Tinglash",
+    retryTranscript: "Qayta aniqlash",
+    retrying: "Aniqlanmoqda…",
     previewMode: "Koʼrib chiqish: sezish ishga tushmagan",
     dismiss: "Yopish",
     previewUpdateStatus: "Koʼrib chiqishda yangilanish yoʼq"
@@ -207,6 +213,7 @@ const state = {
   history: fixture.history.map((entry) => ({ ...entry })),
   query: "",
   copiedIndex: null,
+  retryingIndex: null,
   modelStatus: { ...fixture.modelStatus },
   version: fixture.version,
   previewBannerVisible: !tauriInvoke,
@@ -578,6 +585,23 @@ function renderHistory() {
     text.textContent = entry.text || t.noText;
     text.classList.toggle("is-empty", !entry.text);
     row.append(time, text);
+    const listen = document.createElement("button");
+    listen.type = "button";
+    listen.className = "history-copy";
+    listen.setAttribute("aria-label", t.listen);
+    listen.title = t.listen;
+    listen.append(iconUse("speaker"));
+    listen.addEventListener("click", () => simple("history", "play_history_entry", { index: entry.index }));
+    row.append(listen);
+    if (!entry.text) {
+      const retry = document.createElement("button");
+      retry.type = "button";
+      retry.className = "control-button history-retry";
+      retry.disabled = state.retryingIndex !== null;
+      retry.textContent = state.retryingIndex === entry.index ? t.retrying : t.retryTranscript;
+      retry.addEventListener("click", () => retryEntry(entry.index));
+      row.append(retry);
+    }
     if (entry.text) {
       const copy = document.createElement("button");
       copy.type = "button";
@@ -652,6 +676,7 @@ async function fixtureInvoke(command, args = {}) {
     case "open_key_page":
     case "quit_app":
     case "open_onboarding":
+    case "play_history_entry":
       return undefined;
     case "set_transcription_mode":
       settings.transcription_mode = args.mode;
@@ -687,6 +712,9 @@ async function fixtureInvoke(command, args = {}) {
       if (args.key !== null && args.key !== undefined) settings.openai_api_key_set = args.key.trim() !== "";
       if (args.model) settings.openai_model = args.model;
       return reply();
+    case "retry_history_entry":
+      state.history[args.index].text = "Восстановленный текст записи.";
+      return state.history[args.index].text;
     case "history_entries":
       return state.history.map((entry) => ({ ...entry }));
     case "model_download_status":
@@ -1000,6 +1028,22 @@ async function copyDictation(index) {
   } catch (error) {
     setError("history", error);
   }
+}
+
+/// The take through today's engine; the new text lands in the row and the clipboard.
+async function retryEntry(index) {
+  state.retryingIndex = index;
+  setError("history", null);
+  renderHistory();
+  try {
+    const text = await invoke("retry_history_entry", { index });
+    if (state.history[index]) state.history[index].text = String(text || "");
+    state.copiedIndex = index;
+  } catch (error) {
+    setError("history", error);
+  }
+  state.retryingIndex = null;
+  renderHistory();
 }
 
 async function simple(scope, command, args) {

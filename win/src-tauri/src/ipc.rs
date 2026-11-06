@@ -236,6 +236,22 @@ pub async fn copy_history_entry(
 }
 
 #[tauri::command]
+pub async fn retry_history_entry(
+    controller: State<'_, Arc<AppController>>,
+    index: u32,
+) -> Result<String, AppError> {
+    controller.retry_history_entry(index).await
+}
+
+#[tauri::command]
+pub async fn play_history_entry(
+    controller: State<'_, Arc<AppController>>,
+    index: u32,
+) -> Result<(), AppError> {
+    controller.play_history_entry(index).await
+}
+
+#[tauri::command]
 pub fn model_download_status(
     controller: State<'_, Arc<AppController>>,
 ) -> Result<ModelStatusDto, AppError> {

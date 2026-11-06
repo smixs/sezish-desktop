@@ -84,6 +84,36 @@ pub fn play(event: SoundEvent, percent: u8) {
 #[cfg(not(windows))]
 pub fn play(_event: SoundEvent, _percent: u8) {}
 
+/// A stored take, played whole and asynchronously; a second call cuts the first.
+#[cfg(windows)]
+pub fn play_file(path: &std::path::Path) -> Result<(), crate::error::AppError> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows::core::PCWSTR;
+    use windows::Win32::Media::Audio::{PlaySoundW, SND_ASYNC, SND_FILENAME, SND_NODEFAULT};
+
+    let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+    // SND_FILENAME reads the path before returning; the buffer may go after.
+    let played = unsafe {
+        PlaySoundW(
+            PCWSTR(wide.as_ptr()),
+            None,
+            SND_FILENAME | SND_ASYNC | SND_NODEFAULT,
+        )
+    };
+    if played.as_bool() {
+        Ok(())
+    } else {
+        Err(crate::error::AppError::platform(
+            "the take could not be played",
+        ))
+    }
+}
+
+#[cfg(not(windows))]
+pub fn play_file(_path: &std::path::Path) -> Result<(), crate::error::AppError> {
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::{scale_pcm16_wav, sound_file_name};

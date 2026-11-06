@@ -865,6 +865,15 @@ button {
   opacity: 1;
 }
 
+.history-retry {
+  min-height: 28px;
+  font-size: 12px;
+}
+
+.history-retry:disabled {
+  opacity: 0.6;
+}
+
 .history-copy:hover {
   background: var(--hover);
   color: var(--text);
