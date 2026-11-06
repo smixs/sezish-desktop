@@ -15,6 +15,7 @@ mod hotkey;
 mod hud;
 mod ipc;
 mod model_idle;
+mod onboarding;
 mod obs;
 mod platform;
 mod settings;
