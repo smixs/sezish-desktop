@@ -300,6 +300,8 @@ mod tests {
                 wave_intensity: WaveIntensity::Lively,
                 openai_api_key: None,
                 openai_model: OpenAiModel::Transcribe,
+                gemini_api_key: None,
+                gemini_smart_mode: true,
             }
         );
     }
@@ -430,6 +432,8 @@ mod tests {
                 wave_intensity: WaveIntensity::Lively,
                 openai_api_key: None,
                 openai_model: OpenAiModel::Transcribe,
+                gemini_api_key: None,
+                gemini_smart_mode: true,
             }
         );
     }
@@ -437,10 +441,10 @@ mod tests {
     #[test]
     fn cloud_preference_degrades_to_local_without_baked_credentials() {
         use TranscriptionPreference::{Cloud, Local};
-        assert_eq!(effective_transcription_mode(Cloud, true, false), Cloud);
-        assert_eq!(effective_transcription_mode(Cloud, false, false), Local);
-        assert_eq!(effective_transcription_mode(Local, true, true), Local);
-        assert_eq!(effective_transcription_mode(Local, false, false), Local);
+        assert_eq!(effective_transcription_mode(Cloud, true, false, false), Cloud);
+        assert_eq!(effective_transcription_mode(Cloud, false, false, false), Local);
+        assert_eq!(effective_transcription_mode(Local, true, true, true), Local);
+        assert_eq!(effective_transcription_mode(Local, false, false, false), Local);
     }
 
     /// Mac `effectiveTranscriptionMode`: OpenAI without a key falls back like the
@@ -448,10 +452,52 @@ mod tests {
     #[test]
     fn openai_needs_a_key_and_falls_back_like_the_cloud() {
         use TranscriptionPreference::{Cloud, Local, Openai};
-        assert_eq!(effective_transcription_mode(Openai, true, true), Openai);
-        assert_eq!(effective_transcription_mode(Openai, false, true), Openai);
-        assert_eq!(effective_transcription_mode(Openai, true, false), Cloud);
-        assert_eq!(effective_transcription_mode(Openai, false, false), Local);
+        assert_eq!(effective_transcription_mode(Openai, true, true, false), Openai);
+        assert_eq!(effective_transcription_mode(Openai, false, true, false), Openai);
+        assert_eq!(effective_transcription_mode(Openai, true, false, true), Cloud);
+        assert_eq!(effective_transcription_mode(Openai, false, false, true), Local);
+    }
+
+    #[test]
+    fn gemini_needs_its_own_key_and_falls_back_like_the_cloud() {
+        use TranscriptionPreference::{Cloud, Gemini, Local};
+        assert_eq!(effective_transcription_mode(Gemini, true, false, true), Gemini);
+        assert_eq!(effective_transcription_mode(Gemini, false, false, true), Gemini);
+        assert_eq!(effective_transcription_mode(Gemini, true, true, false), Cloud);
+        assert_eq!(effective_transcription_mode(Gemini, false, true, false), Local);
+    }
+
+    /// Mac `geminiSmartMode` defaults to on; the key is trimmed like OpenAI's.
+    #[test]
+    fn gemini_settings_roundtrip_and_load_leniently() {
+        let directory = TempDir::new().expect("temporary directory should be created");
+        let path = directory.path().join("settings.json");
+        let defaults = Settings::default();
+        assert!(defaults.gemini_smart_mode);
+        assert_eq!(defaults.gemini_api_key, None);
+
+        let mut settings = Settings {
+            transcription_mode: TranscriptionPreference::Gemini,
+            gemini_smart_mode: false,
+            ..Settings::default()
+        };
+        settings.set_gemini_api_key(" AIza-test\n");
+        assert_eq!(settings.gemini_api_key.as_deref(), Some("AIza-test"));
+        settings.save(&path).expect("settings should save");
+        assert_eq!(Settings::load(&path), settings);
+
+        settings.set_gemini_api_key("  ");
+        assert_eq!(settings.gemini_api_key, None);
+
+        fs::write(
+            &path,
+            r#"{ "transcription_mode": "gemini", "gemini_api_key": "", "gemini_smart_mode": "yes" }"#,
+        )
+        .expect("fixture should be written");
+        let loaded = Settings::load(&path);
+        assert_eq!(loaded.transcription_mode, TranscriptionPreference::Gemini);
+        assert_eq!(loaded.gemini_api_key, None);
+        assert!(loaded.gemini_smart_mode);
     }
 
     /// The key is pasted by hand: surrounding spaces and newlines go, an empty
