@@ -364,3 +364,15 @@ impl Transcriber for LocalTranscriber {
             .map_err(Into::into)
     }
 }
+
+#[cfg(test)]
+mod session_tests {
+    use super::SESSION_CONFIG;
+
+    /// Mac `GigaAmTranscriber.sessionConfig`: repacking the int8 weights costs ~300 MB for
+    /// the life of the session and buys no speed here.
+    #[test]
+    fn sessions_skip_weight_prepacking() {
+        assert!(SESSION_CONFIG.contains(&("session.disable_prepacking", "1")));
+    }
+}
