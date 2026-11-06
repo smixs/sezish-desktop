@@ -34,6 +34,7 @@ const strings = {
     launchAtLogin: "Запуск при входе",
     advanced: "Дополнительно",
     language: "Язык",
+    runAgain: "Пройти настройку заново",
     cloudTitle: "Облако",
     cloudSubtitle: "Быстро и без скачиваний. Нужен интернет",
     cloudUnavailable: "Облако недоступно в этой сборке",
@@ -61,9 +62,9 @@ const strings = {
     keyMissing: "Без ключа диктовка идёт через облако или локальную модель",
     modelSection: "Модель",
     modelMultiTitle: "Русский, узбекский, казахский, кыргызский",
-    modelMultiSubtitle: "Без знаков препинания. 215 МБ",
+    modelMultiSubtitle: "Без знаков препинания. 215 МБ",
     modelRuEnTitle: "Русский и английский",
-    modelRuEnSubtitle: "Знаки препинания и заглавные буквы. 225 МБ",
+    modelRuEnSubtitle: "Знаки препинания и заглавные буквы. 225 МБ",
     modelFooter: "Модель работает на этом компьютере, без интернета",
     downloadModel: "Скачать модель",
     downloadingModel: "Скачивание модели…",
@@ -112,6 +113,7 @@ const strings = {
     launchAtLogin: "Kirishda ishga tushirish",
     advanced: "Qoʼshimcha",
     language: "Til",
+    runAgain: "Sozlashni qaytadan oʼtish",
     cloudTitle: "Bulut",
     cloudSubtitle: "Tez, yuklab olishsiz. Internet kerak",
     cloudUnavailable: "Bulut bu versiyada mavjud emas",
@@ -139,9 +141,9 @@ const strings = {
     keyMissing: "Kalitsiz diktovka bulut yoki qurilmadagi model orqali ishlaydi",
     modelSection: "Model",
     modelMultiTitle: "Rus, oʼzbek, qozoq, qirgʼiz",
-    modelMultiSubtitle: "Tinish belgilarisiz. 215 MB",
+    modelMultiSubtitle: "Tinish belgilarisiz. 215 MB",
     modelRuEnTitle: "Rus va ingliz",
-    modelRuEnSubtitle: "Tinish belgilari va bosh harflar bilan. 225 MB",
+    modelRuEnSubtitle: "Tinish belgilari va bosh harflar bilan. 225 MB",
     modelFooter: "Model shu kompyuterda, internetsiz ishlaydi",
     downloadModel: "Modelni yuklab olish",
     downloadingModel: "Model yuklanmoqda…",
@@ -649,6 +651,7 @@ async function fixtureInvoke(command, args = {}) {
     case "open_history_folder":
     case "open_key_page":
     case "quit_app":
+    case "open_onboarding":
       return undefined;
     case "set_transcription_mode":
       settings.transcription_mode = args.mode;
@@ -745,20 +748,6 @@ const MODIFIER_CODES = {
   MetaRight: 0x5c
 };
 
-const MODIFIER_VK = {
-  0xa0: ["left", "Shift"],
-  0xa1: ["right", "Shift"],
-  0xa2: ["left", "Ctrl"],
-  0xa3: ["right", "Ctrl"],
-  0xa4: ["left", "Alt"],
-  0xa5: ["right", "Alt"],
-  0x5b: ["left", "Win"],
-  0x5c: ["right", "Win"]
-};
-
-const MOD_NAME = { ctrl: "Ctrl", alt: "Alt", shift: "Shift", win: "Win" };
-const MOD_ORDER = ["ctrl", "alt", "shift", "win"];
-
 function codeToVk(code) {
   if (Object.prototype.hasOwnProperty.call(MODIFIER_CODES, code)) {
     return MODIFIER_CODES[code];
@@ -779,10 +768,6 @@ function codeToVk(code) {
   return null;
 }
 
-function isFunctionVk(vk) {
-  return vk >= 0x70 && vk <= 0x7b;
-}
-
 function modsFromEvent(event) {
   const mods = [];
   if (event.ctrlKey) mods.push("ctrl");
@@ -790,41 +775,6 @@ function modsFromEvent(event) {
   if (event.shiftKey) mods.push("shift");
   if (event.metaKey) mods.push("win");
   return mods;
-}
-
-function mainKeyName(vk) {
-  if ((vk >= 0x30 && vk <= 0x39) || (vk >= 0x41 && vk <= 0x5a)) {
-    return String.fromCharCode(vk);
-  }
-  if (isFunctionVk(vk)) {
-    return `F${vk - 0x6f}`;
-  }
-  if (vk === 0x20) {
-    return "Space";
-  }
-  return `0x${vk.toString(16).toUpperCase()}`;
-}
-
-function formatShortcut(shortcut, t) {
-  if (!shortcut || typeof shortcut !== "object") {
-    return "";
-  }
-  if (shortcut.kind === "modifier") {
-    const info = MODIFIER_VK[shortcut.vk];
-    if (!info) {
-      return mainKeyName(shortcut.vk);
-    }
-    const side = info[0] === "right" ? t.keyRight : t.keyLeft;
-    return `${side} ${info[1]}`;
-  }
-  if (shortcut.kind === "key") {
-    const mods = (shortcut.mods || [])
-      .slice()
-      .sort((a, b) => MOD_ORDER.indexOf(a) - MOD_ORDER.indexOf(b))
-      .map((mod) => MOD_NAME[mod] || mod);
-    return mods.concat([mainKeyName(shortcut.vk)]).join(" + ");
-  }
-  return "";
 }
 
 function setRecorderText(text) {
@@ -1135,6 +1085,7 @@ function bindEvents() {
     item.addEventListener("click", () => showPane(item.dataset.pane));
   });
   elements["quit"].addEventListener("click", () => simple("general", "quit_app"));
+  byId("run-onboarding").addEventListener("click", () => simple("controls", "open_onboarding"));
   elements["check-updates"].addEventListener("click", checkForUpdates);
 
   elements["shortcut-recorder"].addEventListener("click", toggleRecorder);

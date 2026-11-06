@@ -1,0 +1,271 @@
+/* The first-run tour: Mac OnboardingView's layout (centered heading, one card,
+   language switch and «Назад» at the foot) on the settings window's tokens. */
+
+body.tour {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  height: 100%;
+  background: var(--bg);
+}
+
+html[data-shell="tauri"] body.tour {
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+}
+
+.tour-stage {
+  display: grid;
+  place-items: center;
+  min-height: 0;
+  padding: 40px 40px 0;
+}
+
+.screen {
+  display: grid;
+  justify-items: center;
+  gap: 20px;
+  width: 100%;
+  max-width: 460px;
+  animation: screen-in 280ms var(--ease-out);
+}
+
+@keyframes screen-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+.heading {
+  display: grid;
+  gap: 8px;
+  text-align: center;
+}
+
+.heading h1,
+.screen-done h1 {
+  margin: 0;
+  font-family: "Segoe UI Variable Display", "Segoe UI Variable", "Segoe UI", sans-serif;
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1.25;
+  text-wrap: balance;
+}
+
+.heading p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+  text-wrap: balance;
+}
+
+.tour-card {
+  width: 100%;
+}
+
+.allowed-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--green);
+}
+
+.allowed-mark .icon {
+  stroke-width: 2;
+}
+
+.choices {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+}
+
+.choice {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 14px 16px;
+  border: 1px solid var(--faint);
+  border-radius: var(--radius-card);
+  background: var(--bg-soft);
+  transition:
+    border-color 120ms ease,
+    background-color 120ms ease;
+}
+
+.choice:hover {
+  background: color-mix(in srgb, var(--bg-soft) 92%, var(--text));
+}
+
+.choice[aria-checked="true"] {
+  border-color: var(--accent);
+}
+
+.choice[aria-checked="true"] .radio {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.choice[aria-checked="true"] .radio::after {
+  transform: scale(1);
+}
+
+.choice-icon {
+  width: 22px;
+  height: 22px;
+  color: var(--muted);
+}
+
+.choice-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.badge {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent-text);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.choice-status {
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.choice-status.is-ready {
+  color: var(--green);
+}
+
+.choice-status.is-failed {
+  color: var(--red);
+}
+
+.tour-primary {
+  min-width: 160px;
+  min-height: 36px;
+  font-size: 14px;
+}
+
+.tour-primary:disabled {
+  opacity: 0.55;
+  filter: none;
+}
+
+.screen-done {
+  gap: 16px;
+}
+
+.done-glyph {
+  width: 44px;
+  height: 58px;
+}
+
+.screen-done h1 {
+  font-size: 24px;
+}
+
+.key-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.keycap {
+  padding: 3px 8px;
+  border: 1px solid var(--faint);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  background: var(--bg-soft);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.tray-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border: 1px solid var(--faint);
+  border-radius: 999px;
+  background: var(--bg-soft);
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.download-pill {
+  position: fixed;
+  top: 14px;
+  left: 50%;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 12px;
+  border: 1px solid var(--faint);
+  border-radius: 999px;
+  background: var(--bg-soft);
+  font-size: 12px;
+  transform: translateX(-50%);
+}
+
+.pill-percent {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--faint);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 800ms linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.tour-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+}
+
+.back-text {
+  padding: 4px 6px;
+  border-radius: 4px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.back-text:hover {
+  color: var(--text);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .screen {
+    animation: none;
+  }
+
+  .spinner {
+    animation-duration: 2400ms;
+  }
+}
