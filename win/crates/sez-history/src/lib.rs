@@ -395,4 +395,69 @@ mod tests {
             "serialized index must not contain the absolute history directory"
         );
     }
+
+    /// Mac `DictationHistory`: a take whose text never came out keeps its audio
+    /// outside the FIFO, so it can still be recognised again later.
+    #[tokio::test]
+    async fn failed_takes_stay_outside_the_fifo() {
+        let directory = TempDir::new().expect("temporary directory should be created");
+        let mut history = history_with_capacity(directory.path(), 2);
+        history.record("", &[1, 2, 3]).await.unwrap();
+        history.record("one", &[4]).await.unwrap();
+        history.record("two", &[5]).await.unwrap();
+        history.record("three", &[6]).await.unwrap();
+
+        let texts: Vec<String> = history
+            .recent()
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|entry| entry.text)
+            .collect();
+        assert_eq!(texts, ["three", "two", ""]);
+        assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 3 + 1);
+    }
+
+    /// Index 0 is the newest, as `recent` lists them.
+    #[tokio::test]
+    async fn a_take_is_read_back_and_its_text_replaced_after_a_retry() {
+        let directory = TempDir::new().expect("temporary directory should be created");
+        let mut history = history_with_capacity(directory.path(), 2);
+        history.record("", &[7, -8, 9]).await.unwrap();
+        history.record("newer", &[1]).await.unwrap();
+
+        assert_eq!(history.samples(1).unwrap(), vec![7, -8, 9]);
+        assert!(history.audio_path(1).unwrap().ends_with(wav_file_name(&index_records(directory.path())[0])));
+
+        history.update_text(1, "recovered").unwrap();
+
+        let reloaded = history_with_capacity(directory.path(), 2);
+        let entries = reloaded.recent().await.unwrap();
+        assert_eq!(entries[1].text, "recovered");
+        assert_eq!(entries[1].recorded_at, fixed_now());
+        assert_eq!(reloaded.samples(1).unwrap(), vec![7, -8, 9]);
+        assert!(history.samples(5).is_err());
+    }
+
+    /// A recovered take joins the FIFO, and the oldest text makes room for it.
+    #[tokio::test]
+    async fn a_recovered_take_counts_against_the_capacity() {
+        let directory = TempDir::new().expect("temporary directory should be created");
+        let mut history = history_with_capacity(directory.path(), 2);
+        history.record("old", &[1]).await.unwrap();
+        history.record("", &[2]).await.unwrap();
+        history.record("new", &[3]).await.unwrap();
+
+        history.update_text(1, "recovered").unwrap();
+
+        let texts: Vec<String> = history
+            .recent()
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|entry| entry.text)
+            .collect();
+        assert_eq!(texts, ["new", "recovered"]);
+    }
+
 }
