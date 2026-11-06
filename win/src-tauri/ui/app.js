@@ -199,6 +199,8 @@ const fixture = {
   version: "0.1.10-preview"
 };
 
+const GEMINI_IN_RELEASE = false;
+
 const tauriGlobal = window.__TAURI__;
 const tauriInvoke =
   tauriGlobal && tauriGlobal.core && typeof tauriGlobal.core.invoke === "function"
@@ -425,6 +427,9 @@ function renderRecognition() {
   // explains the absence instead of a dead radio button.
   cloudRow.hidden = !settings.cloud_available;
   elements["cloud-unavailable"].hidden = settings.cloud_available;
+  // Release 1 ships without Gemini (Serge, 06.11.2026): it comes later as a
+  // live stream like the Mac. The backend path stays for that release.
+  document.querySelector('[data-mode="gemini"]').hidden = !GEMINI_IN_RELEASE;
   check(all("[data-mode]"), (el) => el.dataset.mode === mode);
 
   elements["gemini-section"].hidden = mode !== "gemini";
