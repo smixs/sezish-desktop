@@ -233,3 +233,29 @@ pub fn foreground_window_center() -> Option<(f64, f64)> {
 pub fn foreground_window_center() -> Option<(f64, f64)> {
     None
 }
+
+#[cfg(test)]
+mod tests {
+    use super::microphone_from;
+    use crate::onboarding::Microphone;
+
+    /// Privacy & security → Microphone: the device switch, «Microphone access» for
+    /// this user and «Let desktop apps access your microphone» each turn it off on
+    /// their own. Windows writes the values only once a switch was touched, and the
+    /// untouched default is on.
+    #[test]
+    fn the_microphone_is_off_when_any_of_the_three_switches_is() {
+        assert_eq!(microphone_from(None, None, None), Microphone::Granted);
+        assert_eq!(
+            microphone_from(Some("Allow"), Some("Allow"), Some("Allow")),
+            Microphone::Granted
+        );
+        assert_eq!(microphone_from(Some("Deny"), None, None), Microphone::Denied);
+        assert_eq!(microphone_from(None, Some("Deny"), None), Microphone::Denied);
+        assert_eq!(
+            microphone_from(Some("Allow"), Some("Allow"), Some("Deny")),
+            Microphone::Denied
+        );
+        assert_eq!(microphone_from(Some("Prompt"), None, None), Microphone::Undetermined);
+    }
+}
