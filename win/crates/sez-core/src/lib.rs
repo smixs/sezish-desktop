@@ -4,6 +4,7 @@ use thiserror::Error;
 
 pub mod feedback;
 pub mod wav;
+pub mod wave;
 
 /// Errors shared by the frozen adapter seams.
 #[non_exhaustive]
