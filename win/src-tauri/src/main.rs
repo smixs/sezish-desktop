@@ -15,8 +15,8 @@ mod hotkey;
 mod hud;
 mod ipc;
 mod model_idle;
-mod onboarding;
 mod obs;
+mod onboarding;
 mod platform;
 mod settings;
 mod sounds;
@@ -54,6 +54,8 @@ fn run() -> tauri::Result<()> {
             ipc::set_wave_intensity,
             ipc::quit_app,
             ipc::open_key_page,
+            ipc::onboarding_action,
+            ipc::open_onboarding,
             ipc::hud_notice_clicked,
             ipc::set_autostart,
             ipc::recent_dictations,
@@ -84,7 +86,14 @@ fn run() -> tauri::Result<()> {
             let tray = TrayUi::install(app)?;
             let controller =
                 tauri::async_runtime::block_on(AppController::new(app.handle().clone(), tray))?;
+            let tour = tauri::async_runtime::block_on(controller.onboarding_needed());
+            if tour {
+                tauri::async_runtime::block_on(controller.start_onboarding());
+            }
             app.manage(controller);
+            if tour {
+                open_onboarding_window(app.handle());
+            }
 
             let configured_tray = app.tray_by_id("main").ok_or_else(|| {
                 std::io::Error::new(std::io::ErrorKind::NotFound, "configured tray icon missing")
@@ -169,6 +178,29 @@ pub(crate) fn open_settings_window(app: &tauri::AppHandle) {
             ..Default::default()
         });
     // Gated out of the macOS dev build, as in the HUD.
+    #[cfg(not(target_os = "macos"))]
+    let builder = builder.transparent(true);
+    let _ = builder.build();
+}
+
+/// The first-run tour (Mac `OnboardingWindow`: 560 × 480, fixed).
+pub(crate) fn open_onboarding_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("onboarding") {
+        let _ = window.show();
+        let _ = window.set_focus();
+        return;
+    }
+    let builder =
+        WebviewWindowBuilder::new(app, "onboarding", WebviewUrl::App("onboarding.html".into()))
+            .title("sezish")
+            .inner_size(560.0, 500.0)
+            .resizable(false)
+            .maximizable(false)
+            .center()
+            .effects(tauri::utils::config::WindowEffectsConfig {
+                effects: vec![tauri::window::Effect::Mica],
+                ..Default::default()
+            });
     #[cfg(not(target_os = "macos"))]
     let builder = builder.transparent(true);
     let _ = builder.build();

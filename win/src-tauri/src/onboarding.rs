@@ -126,14 +126,6 @@ impl Flow {
         self.model
     }
 
-    pub fn microphone(&self) -> Microphone {
-        self.microphone
-    }
-
-    pub fn cloud_baked(&self) -> bool {
-        self.cloud_baked
-    }
-
     pub fn engine_ready(&self) -> bool {
         match self.engine {
             Engine::Cloud => self.cloud_baked,
@@ -447,7 +439,12 @@ mod tests {
             Model::Missing,
             true
         ));
-        assert!(Flow::needed(Microphone::Granted, Engine::Cloud, Model::Ready, false) == false);
+        assert!(!Flow::needed(
+            Microphone::Granted,
+            Engine::Cloud,
+            Model::Ready,
+            false
+        ));
         assert!(Flow::needed(
             Microphone::Granted,
             Engine::Cloud,

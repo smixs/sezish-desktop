@@ -234,6 +234,52 @@ pub fn foreground_window_center() -> Option<(f64, f64)> {
     None
 }
 
+/// The three microphone switches under Privacy & security, each `Allow`, `Deny`
+/// or absent (never touched, which is on). Any `Deny` keeps sezish deaf.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn microphone_from(
+    device: Option<&str>,
+    user: Option<&str>,
+    desktop_apps: Option<&str>,
+) -> crate::onboarding::Microphone {
+    use crate::onboarding::Microphone;
+    let values = [device, user, desktop_apps];
+    if values.contains(&Some("Deny")) {
+        Microphone::Denied
+    } else if values
+        .iter()
+        .all(|value| matches!(value, None | Some("Allow")))
+    {
+        Microphone::Granted
+    } else {
+        Microphone::Undetermined
+    }
+}
+
+#[cfg(windows)]
+pub fn microphone_access() -> crate::onboarding::Microphone {
+    use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ};
+    use winreg::RegKey;
+
+    const STORE: &str = r"Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\microphone";
+    let read = |root, path: &str| -> Option<String> {
+        RegKey::predef(root)
+            .open_subkey_with_flags(path, KEY_READ)
+            .ok()?
+            .get_value::<String, _>("Value")
+            .ok()
+    };
+    let device = read(HKEY_LOCAL_MACHINE, STORE);
+    let user = read(HKEY_CURRENT_USER, STORE);
+    let desktop = read(HKEY_CURRENT_USER, &format!(r"{STORE}\NonPackaged"));
+    microphone_from(device.as_deref(), user.as_deref(), desktop.as_deref())
+}
+
+#[cfg(not(windows))]
+pub fn microphone_access() -> crate::onboarding::Microphone {
+    crate::onboarding::Microphone::Granted
+}
+
 #[cfg(test)]
 mod tests {
     use super::microphone_from;
@@ -250,12 +296,21 @@ mod tests {
             microphone_from(Some("Allow"), Some("Allow"), Some("Allow")),
             Microphone::Granted
         );
-        assert_eq!(microphone_from(Some("Deny"), None, None), Microphone::Denied);
-        assert_eq!(microphone_from(None, Some("Deny"), None), Microphone::Denied);
+        assert_eq!(
+            microphone_from(Some("Deny"), None, None),
+            Microphone::Denied
+        );
+        assert_eq!(
+            microphone_from(None, Some("Deny"), None),
+            Microphone::Denied
+        );
         assert_eq!(
             microphone_from(Some("Allow"), Some("Allow"), Some("Deny")),
             Microphone::Denied
         );
-        assert_eq!(microphone_from(Some("Prompt"), None, None), Microphone::Undetermined);
+        assert_eq!(
+            microphone_from(Some("Prompt"), None, None),
+            Microphone::Undetermined
+        );
     }
 }

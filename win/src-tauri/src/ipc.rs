@@ -141,6 +141,48 @@ pub fn open_key_page(provider: String) -> Result<(), AppError> {
     crate::platform::open_url(key_page(&provider)?)
 }
 
+/// `poll`, `grant_microphone`, `choose_local`, `choose_cloud`, `retry`,
+/// `continue`, `back`.
+fn onboarding_input(action: &str) -> Result<crate::onboarding::Input, AppError> {
+    use crate::onboarding::{Engine, Input, Microphone};
+    Ok(match action {
+        // The microphone value is read fresh by the controller.
+        "poll" => Input::Status(Microphone::Undetermined),
+        "grant_microphone" => Input::GrantMicrophone,
+        "choose_local" => Input::ChooseEngine(Engine::Local),
+        "choose_cloud" => Input::ChooseEngine(Engine::Cloud),
+        "retry" => Input::RetryDownload,
+        "continue" => Input::Continue,
+        "back" => Input::Back,
+        _ => {
+            return Err(AppError::invalid(format!(
+                "unknown onboarding action {action}"
+            )))
+        }
+    })
+}
+
+#[tauri::command]
+pub async fn onboarding_action(
+    controller: State<'_, Arc<AppController>>,
+    action: String,
+) -> Result<crate::dto::OnboardingDto, AppError> {
+    controller
+        .onboarding_action(onboarding_input(&action)?)
+        .await
+}
+
+/// «Пройти настройку заново» in the settings window.
+#[tauri::command]
+pub async fn open_onboarding(
+    app: tauri::AppHandle,
+    controller: State<'_, Arc<AppController>>,
+) -> Result<(), AppError> {
+    controller.start_onboarding().await;
+    crate::open_onboarding_window(&app);
+    Ok(())
+}
+
 /// «Выйти из sezish» at the foot of the settings sidebar, as on the Mac.
 #[tauri::command]
 pub fn quit_app(app: tauri::AppHandle) {

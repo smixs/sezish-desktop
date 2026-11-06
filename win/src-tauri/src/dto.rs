@@ -68,3 +68,17 @@ pub struct UpdateCheckDto {
     pub available: bool,
     pub message: String,
 }
+
+/// The tour window's whole state, refreshed after every action and poll.
+#[derive(Clone, Debug, Serialize)]
+pub struct OnboardingDto {
+    pub running: bool,
+    pub step: Option<crate::onboarding::Step>,
+    pub microphone: Option<crate::onboarding::Row>,
+    pub engine: Option<crate::onboarding::Engine>,
+    pub model: Option<crate::onboarding::Model>,
+    pub engine_ready: bool,
+    pub cloud_baked: bool,
+    /// The microphone just turned on: the window shows the check, then continues.
+    pub advance_soon: bool,
+}

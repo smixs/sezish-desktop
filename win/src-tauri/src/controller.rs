@@ -1,5 +1,6 @@
 use crate::dto::{
-    DictationEntryDto, DictationOutcomeDto, ModelStatusDto, SettingsDto, UpdateCheckDto,
+    DictationEntryDto, DictationOutcomeDto, ModelStatusDto, OnboardingDto, SettingsDto,
+    UpdateCheckDto,
 };
 use crate::error::AppError;
 use crate::hotkey::HotkeyAdapter;
@@ -27,7 +28,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex as SyncMutex, MutexGuard};
 use std::time::{Duration, Instant, UNIX_EPOCH};
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 use tauri_plugin_updater::UpdaterExt;
 use tokio::sync::Mutex;
 
@@ -144,6 +145,8 @@ pub struct AppController {
     cloud_credentials: Option<CloudCredentials>,
     /// The HUD's wave input, fed by the capture tap in every mode.
     level: Option<crate::hud::LevelSink>,
+    /// The first-run tour while its window is open.
+    onboarding: SyncMutex<Option<crate::onboarding::Flow>>,
 }
 
 impl AppController {
@@ -180,6 +183,7 @@ impl AppController {
             hotkey: SyncMutex::new(None),
             cloud_credentials: baked_cloud_credentials(),
             level,
+            onboarding: SyncMutex::new(None),
         });
 
         sez_asr_local::set_logger(crate::obs::log);
@@ -616,6 +620,121 @@ impl AppController {
             controller.finish_model_download(result).await;
         });
         Ok(())
+    }
+
+    // ------------------------------------------------------------ onboarding --
+
+    fn onboarding_engine(settings: &Settings) -> crate::onboarding::Engine {
+        if settings.transcription_mode == TranscriptionPreference::Local {
+            crate::onboarding::Engine::Local
+        } else {
+            crate::onboarding::Engine::Cloud
+        }
+    }
+
+    fn onboarding_model(&self) -> crate::onboarding::Model {
+        use crate::onboarding::Model;
+        if self.model_store().is_ready() {
+            return Model::Ready;
+        }
+        match self.model_download_status() {
+            ModelStatusDto::Downloading { fraction } => Model::Downloading(fraction),
+            ModelStatusDto::Failed { .. } => Model::Failed,
+            ModelStatusDto::Ready => Model::Ready,
+            ModelStatusDto::Missing => Model::Missing,
+        }
+    }
+
+    /// The tour opens at launch only when dictation could not work yet (Mac).
+    pub async fn onboarding_needed(&self) -> bool {
+        let engine = Self::onboarding_engine(&self.runtime.lock().await.settings);
+        crate::onboarding::Flow::needed(
+            crate::platform::microphone_access(),
+            engine,
+            self.onboarding_model(),
+            self.cloud_credentials.is_some(),
+        )
+    }
+
+    /// A fresh tour; also «Пройти настройку заново» from the settings window.
+    pub async fn start_onboarding(&self) {
+        let engine = Self::onboarding_engine(&self.runtime.lock().await.settings);
+        *lock_recover(&self.onboarding) = Some(crate::onboarding::Flow::new(
+            crate::platform::microphone_access(),
+            engine,
+            self.onboarding_model(),
+            self.cloud_credentials.is_some(),
+        ));
+    }
+
+    /// One input from the tour window (`poll` every second while it is open), and
+    /// whatever the flow asks for in return.
+    pub async fn onboarding_action(
+        self: &Arc<Self>,
+        action: crate::onboarding::Input,
+    ) -> Result<OnboardingDto, AppError> {
+        use crate::onboarding::{Effect, Engine, Input};
+        let inputs = match action {
+            // The poll reads both: Windows' switch and the download.
+            Input::Status(_) => vec![
+                Input::Status(crate::platform::microphone_access()),
+                Input::Model(self.onboarding_model()),
+            ],
+            other => vec![other],
+        };
+        let mut effects = Vec::new();
+        {
+            let mut guard = lock_recover(&self.onboarding);
+            let flow = guard
+                .as_mut()
+                .ok_or_else(|| AppError::not_ready("onboarding is not running"))?;
+            for input in inputs {
+                effects.push(flow.on(input));
+            }
+        }
+        if let Input::ChooseEngine(engine) = action {
+            let mode = match engine {
+                Engine::Local => TranscriptionPreference::Local,
+                Engine::Cloud => TranscriptionPreference::Cloud,
+            };
+            self.set_transcription_mode(mode).await?;
+        }
+        let mut advance_soon = false;
+        for effect in effects {
+            match effect {
+                Effect::None => {}
+                Effect::RequestMicrophone | Effect::OpenMicrophoneSettings => {
+                    crate::platform::open_url("ms-settings:privacy-microphone")?;
+                }
+                Effect::DownloadModel => {
+                    self.set_transcription_mode(TranscriptionPreference::Local)
+                        .await?;
+                    self.download_model()?;
+                }
+                Effect::AdvanceSoon => advance_soon = true,
+                Effect::Finish => {
+                    if let Some(window) = self.app.get_webview_window("onboarding") {
+                        let _ = window.close();
+                    }
+                }
+            }
+        }
+        Ok(self.onboarding_view(advance_soon))
+    }
+
+    pub fn onboarding_view(&self, advance_soon: bool) -> OnboardingDto {
+        let guard = lock_recover(&self.onboarding);
+        let flow = guard.as_ref();
+        OnboardingDto {
+            running: flow.is_some(),
+            step: flow.map(|flow| flow.step()),
+            microphone: flow.map(|flow| flow.row()),
+            engine: flow.map(|flow| flow.engine()),
+            model: flow.map(|flow| flow.model()),
+            engine_ready: flow.is_some_and(|flow| flow.engine_ready()),
+            cloud_baked: self.cloud_credentials.is_some(),
+            advance_soon,
+        }
     }
 
     pub fn open_history_folder(&self) -> Result<(), AppError> {
