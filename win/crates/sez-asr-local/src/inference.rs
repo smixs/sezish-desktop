@@ -15,6 +15,18 @@ use tokio::runtime::Handle;
 const PREPROCESSOR: &[u8] = include_bytes!("../resources/gigaam_v3_conv.onnx");
 const WARMUP_SAMPLES: usize = 8_000;
 
+/// Repacking the int8 weights into the engine's own layout costs ~300 MB for the life of
+/// the session and buys no speed here (measured on the Mac, same model and runtime).
+const SESSION_CONFIG: &[(&str, &str)] = &[("session.disable_prepacking", "1")];
+
+fn session_builder() -> Result<ort::session::builder::SessionBuilder, ort::Error> {
+    SESSION_CONFIG
+        .iter()
+        .try_fold(Session::builder()?, |builder, (key, value)| {
+            builder.with_config_entry(key, value)
+        })
+}
+
 /// How far the streamed take may fall short of the recording the microphone returned before it
 /// is thrown away. The stream and the recording are resampled separately, so their lengths
 /// differ by the filter delay and a partial block; 0.25 s covers that and nothing a listener
@@ -91,8 +103,8 @@ impl LocalTranscriber {
         let runtime = Handle::current();
         let vocab = model.vocab(vocab_path.as_ref())?;
         ort::init().commit()?;
-        let preprocessor = Session::builder()?.commit_from_memory(PREPROCESSOR)?;
-        let acoustic_model = Session::builder()?.commit_from_file(model_path)?;
+        let preprocessor = session_builder()?.commit_from_memory(PREPROCESSOR)?;
+        let acoustic_model = session_builder()?.commit_from_file(model_path)?;
 
         Ok(Self {
             inner: Arc::new(Inner {
