@@ -630,7 +630,7 @@ impl AppController {
     }
 
     fn settings_dto(&self, settings: &Settings) -> Result<SettingsDto, AppError> {
-        let effective = self.effective_mode(&settings);
+        let effective = self.effective_mode(settings);
         let resolved = settings
             .language
             .unwrap_or_else(|| resolve_system_language(&system_locale()));
