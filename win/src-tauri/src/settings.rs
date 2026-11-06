@@ -202,7 +202,8 @@ pub fn resolve_system_language(locale: &str) -> AppLanguage {
 mod tests {
     use super::{
         effective_transcription_mode, resolve_system_language, AppLanguage, AsrModel,
-        HotkeyPreference, HudPlacement, Settings, TranscriptionPreference, WaveIntensity,
+        HotkeyPreference, HudPlacement, OpenAiModel, Settings, TranscriptionPreference,
+        WaveIntensity,
     };
     use sez_hotkey::{Modifiers, Shortcut};
     use std::fs;
@@ -238,6 +239,8 @@ mod tests {
                 sound_volume: 50,
                 hud_placement: HudPlacement::Bottom,
                 wave_intensity: WaveIntensity::Lively,
+                openai_api_key: None,
+                openai_model: OpenAiModel::Transcribe,
             }
         );
     }
@@ -372,22 +375,69 @@ mod tests {
 
     #[test]
     fn cloud_preference_degrades_to_local_without_baked_credentials() {
-        assert_eq!(
-            effective_transcription_mode(TranscriptionPreference::Cloud, true),
-            TranscriptionPreference::Cloud
-        );
-        assert_eq!(
-            effective_transcription_mode(TranscriptionPreference::Cloud, false),
-            TranscriptionPreference::Local
-        );
-        assert_eq!(
-            effective_transcription_mode(TranscriptionPreference::Local, true),
-            TranscriptionPreference::Local
-        );
-        assert_eq!(
-            effective_transcription_mode(TranscriptionPreference::Local, false),
-            TranscriptionPreference::Local
-        );
+        use TranscriptionPreference::{Cloud, Local};
+        assert_eq!(effective_transcription_mode(Cloud, true, false), Cloud);
+        assert_eq!(effective_transcription_mode(Cloud, false, false), Local);
+        assert_eq!(effective_transcription_mode(Local, true, true), Local);
+        assert_eq!(effective_transcription_mode(Local, false, false), Local);
+    }
+
+    /// Mac `effectiveTranscriptionMode`: OpenAI without a key falls back like the
+    /// cloud does — to the cloud when it is baked in, otherwise to local.
+    #[test]
+    fn openai_needs_a_key_and_falls_back_like_the_cloud() {
+        use TranscriptionPreference::{Cloud, Local, Openai};
+        assert_eq!(effective_transcription_mode(Openai, true, true), Openai);
+        assert_eq!(effective_transcription_mode(Openai, false, true), Openai);
+        assert_eq!(effective_transcription_mode(Openai, true, false), Cloud);
+        assert_eq!(effective_transcription_mode(Openai, false, false), Local);
+    }
+
+    /// The key is pasted by hand: surrounding spaces and newlines go, an empty
+    /// field means no key.
+    #[test]
+    fn openai_key_is_trimmed_and_empty_means_none() {
+        let mut settings = Settings::default();
+        assert_eq!(settings.openai_api_key, None);
+
+        settings.set_openai_api_key("  sk-test \n");
+        assert_eq!(settings.openai_api_key.as_deref(), Some("sk-test"));
+
+        settings.set_openai_api_key("   ");
+        assert_eq!(settings.openai_api_key, None);
+    }
+
+    #[test]
+    fn openai_settings_roundtrip_and_load_leniently() {
+        let directory = TempDir::new().expect("temporary directory should be created");
+        let path = directory.path().join("settings.json");
+
+        let mut settings = Settings {
+            transcription_mode: TranscriptionPreference::Openai,
+            openai_model: OpenAiModel::Mini,
+            ..Settings::default()
+        };
+        settings.set_openai_api_key("sk-test");
+        settings.save(&path).expect("settings should save");
+        assert_eq!(Settings::load(&path), settings);
+
+        fs::write(
+            &path,
+            r#"{ "transcription_mode": "openai", "openai_api_key": " sk-x ", "openai_model": "whisper-9" }"#,
+        )
+        .expect("fixture should be written");
+        let loaded = Settings::load(&path);
+        assert_eq!(loaded.transcription_mode, TranscriptionPreference::Openai);
+        assert_eq!(loaded.openai_api_key.as_deref(), Some("sk-x"));
+        assert_eq!(loaded.openai_model, OpenAiModel::Transcribe);
+    }
+
+    #[test]
+    fn openai_models_carry_the_api_names() {
+        assert_eq!(OpenAiModel::Transcribe.name(), "gpt-transcribe");
+        assert_eq!(OpenAiModel::Mini.name(), "gpt-4o-mini-transcribe");
+        assert_eq!(OpenAiModel::from_name("gpt-4o-mini-transcribe"), Some(OpenAiModel::Mini));
+        assert_eq!(OpenAiModel::from_name("whisper-1"), None);
     }
 
     #[test]
