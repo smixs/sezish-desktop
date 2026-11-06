@@ -329,7 +329,15 @@ fn parse_language(language: &str) -> Result<AppLanguage, AppError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_hud_placement, parse_wave_intensity};
+    use super::{key_page, parse_hud_placement, parse_wave_intensity};
+
+    /// «Получить ключ» opens one of two fixed pages, never a URL from the window.
+    #[test]
+    fn key_pages_are_fixed_per_provider() {
+        assert_eq!(key_page("gemini").unwrap(), "https://aistudio.google.com/apikey");
+        assert_eq!(key_page("openai").unwrap(), "https://platform.openai.com/api-keys");
+        assert!(key_page("https://example.com").is_err());
+    }
     use crate::hud::HudPlacement;
     use sez_core::wave::WaveIntensity;
 
