@@ -1,5 +1,5 @@
 #!/bin/sh
-# Конфиги моделей (Onboarding, MeetingTitle, LocalEngine) под TLC с ожиданием по каждому: none или имя нарушенного свойства.
+# Конфиги моделей (Onboarding, MeetingTitle, LocalEngine, WinOnboarding) под TLC с ожиданием по каждому: none или имя нарушенного свойства.
 # Любой сбой tlc или несовпадение ожидания — ненулевой выход.
 set -u
 cd "$(dirname "$0")" || exit 2
@@ -41,5 +41,13 @@ check LocalEngine-safety none
 check LocalEngine-noshare NoTwinCopies
 check LocalEngine-nopin NoTwinCopies
 check LocalEngine-norelease CloudIdleFree
+check WinOnboarding-safety none
+check WinOnboarding-safety-nocloud none
+check WinOnboarding-live none
+check WinOnboarding-live-nocloud none
+check WinOnboarding-nofinishguard FinishOnlyWhenReady
+check WinOnboarding-noback PastMicOnlyWhenGranted
+check WinOnboarding-doubledownload AtMostOneDownload
+check WinOnboarding-nosettings Termination
 echo "check: $ok ok, $failed failed"
 [ "$failed" -eq 0 ]
