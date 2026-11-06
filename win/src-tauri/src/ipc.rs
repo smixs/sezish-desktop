@@ -83,6 +83,12 @@ pub async fn set_play_sounds(
     controller.set_play_sounds(enabled).await
 }
 
+/// A clickable HUD pill: something to fix in Settings.
+#[tauri::command]
+pub fn hud_notice_clicked(app: tauri::AppHandle) {
+    crate::open_settings_window(&app);
+}
+
 #[tauri::command]
 pub async fn set_sound_volume(
     controller: State<'_, Arc<AppController>>,

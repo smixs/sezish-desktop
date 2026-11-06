@@ -17,7 +17,7 @@ use async_trait::async_trait;
 use sez_asr_cloud::CloudTranscriber;
 use sez_asr_local::{AsrModel, LocalTranscriber, ModelDownloader, ModelStore};
 use sez_audio::CpalMic;
-use sez_core::feedback::SoundEvent;
+use sez_core::feedback::{HudNotice, SoundEvent};
 use sez_core::{Clock, Coordinator, History, HistoryEntry, SezError, State, Transcriber};
 use sez_history::FileHistory;
 use sez_hotkey::{Command, HotkeyMode, Shortcut};
@@ -129,6 +129,8 @@ pub struct AppController {
     capture_armed: Arc<SyncMutex<Option<Instant>>>,
     hotkey: SyncMutex<Option<HotkeyAdapter>>,
     cloud_credentials: Option<CloudCredentials>,
+    /// The HUD's wave input, fed by the capture tap in every mode.
+    level: Option<crate::hud::LevelSink>,
 }
 
 impl AppController {
@@ -143,6 +145,7 @@ impl AppController {
         } else {
             ModelStatusDto::Missing
         };
+        let level = tray.level_sink();
         let controller = Arc::new(Self {
             app,
             tray,
@@ -163,6 +166,7 @@ impl AppController {
             capture_armed: Arc::new(SyncMutex::new(None)),
             hotkey: SyncMutex::new(None),
             cloud_credentials: baked_cloud_credentials(),
+            level,
         });
 
         sez_asr_local::set_logger(crate::obs::log);
@@ -193,6 +197,8 @@ impl AppController {
         {
             return Err(AppError::busy("dictation is already active"));
         }
+        let sound = (runtime.settings.play_sounds, runtime.settings.sound_volume);
+        let language = self.language_of(&runtime.settings);
         if runtime.coordinator.is_none() {
             // Rebuilding reloads the local model, which takes seconds on a cold disk
             // cache; the tray says busy instead of looking asleep.
@@ -201,19 +207,36 @@ impl AppController {
             if rebuilt.is_err() || runtime.coordinator.is_none() {
                 self.tray.set_phase(&self.app, TrayPhase::Idle);
             }
-            rebuilt?;
+            if let Err(error) = rebuilt {
+                // A rebuild fails here only on a local model that is missing or broken;
+                // the pill sends the user to Settings either way.
+                play_if(sound, SoundEvent::Error);
+                self.tray.hud_notice(HudNotice::ModelMissing, language);
+                return Err(error);
+            }
         }
-        let sound = (runtime.settings.play_sounds, runtime.settings.sound_volume);
-        let coordinator = runtime.coordinator.as_mut().ok_or_else(|| {
-            AppError::not_ready("Local model is required. Download it from the sezish tray menu.")
-        })?;
+        self.tray.set_hud_style(
+            runtime.settings.hud_placement,
+            runtime.settings.wave_intensity,
+        );
+        let Some(coordinator) = runtime.coordinator.as_mut() else {
+            play_if(sound, SoundEvent::Error);
+            self.tray.hud_notice(HudNotice::ModelMissing, language);
+            return Err(AppError::not_ready(
+                "Local model is required. Download it from the sezish tray menu.",
+            ));
+        };
 
         *lock_recover(&self.capture_armed) = Some(Instant::now());
+        if let Some(level) = &self.level {
+            level.restart();
+        }
         coordinator.begin().await;
         if coordinator.state() != State::Recording {
             self.recording.store(false, Ordering::Release);
             self.tray.set_phase(&self.app, TrayPhase::Idle);
             play_if(sound, SoundEvent::Error);
+            self.tray.hud_notice(HudNotice::MicFailed, language);
             return Err(AppError::not_ready(
                 "Could not start microphone capture. Check Windows microphone permission.",
             ));
@@ -237,6 +260,7 @@ impl AppController {
             .map(|since| since.elapsed());
         let mut runtime = self.runtime.lock().await;
         let sound = (runtime.settings.play_sounds, runtime.settings.sound_volume);
+        let language = self.language_of(&runtime.settings);
         let Some(coordinator) = runtime.coordinator.as_mut() else {
             self.tray.set_phase(&self.app, TrayPhase::Idle);
             return Ok(DictationOutcomeDto::Ignored);
@@ -268,6 +292,10 @@ impl AppController {
         self.apply_pending_mode_locked(&mut runtime)?;
         drop(runtime);
         self.tray.set_phase(&self.app, TrayPhase::Idle);
+        // After Idle: the pill puts the HUD back up for its own few seconds.
+        if let Some(notice) = HudNotice::after(&outcome) {
+            self.tray.hud_notice(notice, language);
+        }
         self.refresh_recent().await;
         self.refresh_model_menu().await;
         Ok(outcome.into())
@@ -429,6 +457,12 @@ impl AppController {
         }
         self.play_sound(SoundEvent::Done).await;
         self.settings().await
+    }
+
+    fn language_of(&self, settings: &Settings) -> AppLanguage {
+        settings
+            .language
+            .unwrap_or_else(|| resolve_system_language(&system_locale()))
     }
 
     async fn play_sound(&self, event: SoundEvent) {
@@ -655,21 +689,28 @@ impl AppController {
         }
         let clock: Arc<dyn Clock> = self.clock.clone();
         let mut mic = CpalMic::new(clock);
-        if let ActiveTranscriber::Local(local) = &transcriber {
-            // The local model runs the recording chunk by chunk while the user is still
-            // speaking, so releasing the hotkey only leaves the tail to transcribe.
-            let sink = local.clone();
-            let armed = self.capture_armed.clone();
-            mic.set_tap(Arc::new(move |samples: &[i16]| {
-                if let Some(begin) = lock_recover(&armed).take() {
-                    crate::obs::log(&format!(
-                        "capture first sample +{}ms",
-                        begin.elapsed().as_millis()
-                    ));
-                }
-                sink.feed(samples);
-            }));
-        }
+        // The local model runs the recording chunk by chunk while the user is still
+        // speaking, so releasing the hotkey only leaves the tail to transcribe.
+        let local = match &transcriber {
+            ActiveTranscriber::Local(local) => Some(local.clone()),
+            ActiveTranscriber::Cloud(_) => None,
+        };
+        let level = self.level.clone();
+        let armed = self.capture_armed.clone();
+        mic.set_tap(Arc::new(move |samples: &[i16]| {
+            if let Some(begin) = lock_recover(&armed).take() {
+                crate::obs::log(&format!(
+                    "capture first sample +{}ms",
+                    begin.elapsed().as_millis()
+                ));
+            }
+            if let Some(local) = &local {
+                local.feed(samples);
+            }
+            if let Some(level) = &level {
+                level.push(samples);
+            }
+        }));
         runtime.coordinator = Some(Coordinator::new(
             mic,
             transcriber,

@@ -1,6 +1,8 @@
+use crate::hud::HudPlacement;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sez_asr_local::AsrModel;
+use sez_core::wave::WaveIntensity;
 use sez_hotkey::Shortcut;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -40,6 +42,40 @@ pub struct Settings {
     /// Percent, 0–100 (Mac `soundVolume` 0…1, default 0.5).
     #[serde(default = "default_sound_volume")]
     pub sound_volume: u8,
+    #[serde(with = "by_name::placement", default)]
+    pub hud_placement: HudPlacement,
+    #[serde(with = "by_name::intensity", default)]
+    pub wave_intensity: WaveIntensity,
+}
+
+/// Stored by name, read back leniently: an unknown name is the default.
+mod by_name {
+    macro_rules! named {
+        ($module:ident, $ty:ty) => {
+            pub mod $module {
+                use serde::{Deserialize, Deserializer, Serializer};
+
+                pub fn serialize<S: Serializer>(
+                    value: &$ty,
+                    serializer: S,
+                ) -> Result<S::Ok, S::Error> {
+                    serializer.serialize_str(value.name())
+                }
+
+                pub fn deserialize<'de, D: Deserializer<'de>>(
+                    deserializer: D,
+                ) -> Result<$ty, D::Error> {
+                    let value = serde_json::Value::deserialize(deserializer)?;
+                    Ok(value
+                        .as_str()
+                        .and_then(<$ty>::from_name)
+                        .unwrap_or_default())
+                }
+            }
+        };
+    }
+    named!(placement, crate::hud::HudPlacement);
+    named!(intensity, sez_core::wave::WaveIntensity);
 }
 
 fn default_sound_volume() -> u8 {
@@ -56,6 +92,8 @@ impl Default for Settings {
             language: None,
             play_sounds: true,
             sound_volume: default_sound_volume(),
+            hud_placement: HudPlacement::Bottom,
+            wave_intensity: WaveIntensity::Lively,
         }
     }
 }
@@ -107,6 +145,20 @@ impl Settings {
         if let Some(volume) = value.get("sound_volume").and_then(Value::as_u64) {
             settings.sound_volume = volume.min(100) as u8;
         }
+        if let Some(placement) = value
+            .get("hud_placement")
+            .and_then(Value::as_str)
+            .and_then(HudPlacement::from_name)
+        {
+            settings.hud_placement = placement;
+        }
+        if let Some(intensity) = value
+            .get("wave_intensity")
+            .and_then(Value::as_str)
+            .and_then(WaveIntensity::from_name)
+        {
+            settings.wave_intensity = intensity;
+        }
         settings
     }
 
@@ -150,10 +202,8 @@ pub fn resolve_system_language(locale: &str) -> AppLanguage {
 mod tests {
     use super::{
         effective_transcription_mode, resolve_system_language, AppLanguage, AsrModel,
-        HotkeyPreference, Settings, TranscriptionPreference,
+        HotkeyPreference, HudPlacement, Settings, TranscriptionPreference, WaveIntensity,
     };
-    use crate::hud::HudPlacement;
-    use sez_core::wave::WaveIntensity;
     use sez_hotkey::{Modifiers, Shortcut};
     use std::fs;
     use tempfile::TempDir;
@@ -202,14 +252,20 @@ mod tests {
         assert_eq!(defaults.hud_placement, HudPlacement::Bottom);
         assert_eq!(defaults.wave_intensity, WaveIntensity::Lively);
 
-        fs::write(&path, r#"{ "hud_placement": "top", "wave_intensity": "bold" }"#)
-            .expect("fixture should be written");
+        fs::write(
+            &path,
+            r#"{ "hud_placement": "top", "wave_intensity": "bold" }"#,
+        )
+        .expect("fixture should be written");
         let loaded = Settings::load(&path);
         assert_eq!(loaded.hud_placement, HudPlacement::Top);
         assert_eq!(loaded.wave_intensity, WaveIntensity::Bold);
 
-        fs::write(&path, r#"{ "hud_placement": "notch", "wave_intensity": 3 }"#)
-            .expect("fixture should be written");
+        fs::write(
+            &path,
+            r#"{ "hud_placement": "notch", "wave_intensity": 3 }"#,
+        )
+        .expect("fixture should be written");
         let loaded = Settings::load(&path);
         assert_eq!(loaded.hud_placement, HudPlacement::Bottom);
         assert_eq!(loaded.wave_intensity, WaveIntensity::Lively);

@@ -47,6 +47,7 @@ fn run() -> tauri::Result<()> {
             ipc::set_language,
             ipc::set_play_sounds,
             ipc::set_sound_volume,
+            ipc::hud_notice_clicked,
             ipc::set_autostart,
             ipc::recent_dictations,
             ipc::copy_dictation,
@@ -141,7 +142,7 @@ fn handle_menu_event(app: &tauri::AppHandle, event: tauri::menu::MenuEvent) {
     }
 }
 
-fn open_settings_window(app: &tauri::AppHandle) {
+pub(crate) fn open_settings_window(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("settings") {
         let _ = window.show();
         let _ = window.set_focus();

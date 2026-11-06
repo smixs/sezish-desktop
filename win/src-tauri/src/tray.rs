@@ -132,6 +132,31 @@ impl TrayUi {
         Ok(ui)
     }
 
+    /// The HUD's level input for the capture tap; None when the HUD failed to build.
+    pub fn level_sink(&self) -> Option<crate::hud::LevelSink> {
+        self.hud.as_ref().map(crate::hud::Hud::level_sink)
+    }
+
+    pub fn set_hud_style(
+        &self,
+        placement: crate::hud::HudPlacement,
+        intensity: sez_core::wave::WaveIntensity,
+    ) {
+        if let Some(hud) = &self.hud {
+            hud.set_style(placement, intensity);
+        }
+    }
+
+    pub fn hud_notice(&self, notice: sez_core::feedback::HudNotice, language: AppLanguage) {
+        if let Some(hud) = &self.hud {
+            hud.notice(
+                crate::hud::notice_text(notice, language),
+                notice.duration(),
+                notice.opens_settings(),
+            );
+        }
+    }
+
     pub fn set_phase(&self, app: &tauri::AppHandle, phase: TrayPhase) {
         let (state, action, enabled, tooltip) = match phase {
             TrayPhase::Idle => ("State: Idle", "Start dictation", true, "sezish — Idle"),

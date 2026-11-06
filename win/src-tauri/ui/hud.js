@@ -5,9 +5,131 @@
 
   window.sezishPhase = function (phase) {
     if (!phases[phase]) return;
+    closeNotice();
     document.body.setAttribute("data-phase", phase);
     if (onPhase) onPhase(phase);
+    if (phase === "recording") startWave();
+    else stopWave();
   };
+
+  var reduceMotion =
+    !!window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  /* The Mac wave (SezishWaveView): Rust sends the auto level ~12 times a
+     second and the strength's numbers; each frame smooths the level, runs
+     the phase at a speed that grows with the voice, and gives every capsule
+     its height on one rolling crest. Colour shimmers regardless of voice:
+     colour says "listening", height says "hearing you". */
+  var wave = { swing: 0.85, base: 1.3, gain: 1.2, attack: 0.05, release: 0.22, minScale: 0.25 };
+  var PHASE_STEP = 1.05; // radians of lag per capsule
+  var WEIGHTS = [1.0, 0.73, 0.91, 1.0, 0.91];
+  var SHIMMER_SPEED = 1.25; // palette positions per second
+  var PALETTE = [
+    [0xff, 0xa7, 0x00],
+    [0xff, 0x6b, 0x00],
+    [0xff, 0x36, 0x00],
+    [0xff, 0x00, 0x44],
+    [0xff, 0x00, 0x87]
+  ];
+  var bars = Array.prototype.slice.call(document.querySelectorAll(".bar"));
+  var target = 0;
+  var level = 0;
+  var wavePhase = 0;
+  var lastFrame = 0;
+  var waveRaf = 0;
+
+  window.sezishWave = function (params) {
+    if (params) wave = params;
+  };
+  window.sezishLevel = function (value) {
+    target = isFinite(value) ? Math.min(Math.max(value, 0), 1) : 0;
+  };
+
+  function color(index, at) {
+    var ring = PALETTE.length;
+    var base = Math.floor(at);
+    var mix = at - base;
+    var a = PALETTE[(index + base) % ring];
+    var b = PALETTE[(index + base + 1) % ring];
+    return "rgb(" + [0, 1, 2].map(function (c) {
+      return Math.round(a[c] + (b[c] - a[c]) * mix);
+    }).join(",") + ")";
+  }
+
+  function waveFrame(now) {
+    waveRaf = requestAnimationFrame(waveFrame);
+    // The frame clock stops while hidden; cap dt so the first frame back
+    // does not teleport the level.
+    var dt = lastFrame ? Math.min(Math.max((now - lastFrame) / 1000, 0), 0.1) : 0;
+    lastFrame = now;
+    var tau = target > level ? wave.attack : wave.release;
+    if (dt > 0) level += (target - level) * (1 - Math.exp(-dt / tau));
+    wavePhase += 2 * Math.PI * (wave.base + wave.gain * level) * dt;
+    var shimmer = (now / 1000) * SHIMMER_SPEED;
+    for (var i = 0; i < bars.length; i++) {
+      var osc = Math.sin(wavePhase - PHASE_STEP * i);
+      var scale = Math.max(wave.minScale, 1 + level * WEIGHTS[i] * wave.swing * osc);
+      bars[i].style.transform = "scaleY(" + scale.toFixed(3) + ")";
+      bars[i].setAttribute("fill", color(i, shimmer));
+    }
+  }
+
+  function startWave() {
+    target = 0;
+    level = 0;
+    lastFrame = 0;
+    if (reduceMotion || waveRaf) return;
+    waveRaf = requestAnimationFrame(waveFrame);
+  }
+
+  function stopWave() {
+    if (waveRaf) cancelAnimationFrame(waveRaf);
+    waveRaf = 0;
+    for (var i = 0; i < bars.length; i++) bars[i].style.transform = "";
+  }
+
+  /* Notice pill: the circle widens into a pill with the text, then fades
+     over its last 200 ms; Rust hides the window right after. */
+  var pill = document.querySelector(".pill");
+  var pillText = document.querySelector(".pill-text");
+  var pillTimer = 0;
+  var pillClickable = false;
+
+  function closeNotice() {
+    if (pillTimer) clearTimeout(pillTimer);
+    pillTimer = 0;
+    pill.classList.remove("open", "clickable");
+    pill.hidden = true;
+    pillClickable = false;
+  }
+
+  window.sezishNotice = function (text, ms, clickable) {
+    closeNotice();
+    stopWave();
+    pillText.textContent = text;
+    pillClickable = !!clickable;
+    pill.classList.toggle("clickable", pillClickable);
+    document.body.setAttribute("data-phase", "notice");
+    pill.hidden = false;
+    requestAnimationFrame(function () {
+      requestAnimationFrame(function () {
+        pill.classList.add("open");
+      });
+    });
+    pillTimer = setTimeout(function () {
+      pill.classList.remove("open");
+    }, Math.max(ms - 200, 0));
+  };
+
+  pill.addEventListener("click", function () {
+    if (!pillClickable) return;
+    var api = window.__TAURI__;
+    if (api && api.core && typeof api.core.invoke === "function") {
+      var call = api.core.invoke("hud_notice_clicked");
+      if (call && typeof call.catch === "function") call.catch(function () {});
+    }
+    closeNotice();
+  });
 
   /* Plasma rim. Port of the metal-fx effect 1 shader, run in the sezish
      palette. Defaults match the reference "chromatic" preset. */

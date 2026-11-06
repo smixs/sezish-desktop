@@ -193,3 +193,28 @@ pub fn show_fatal_dialog(message: &str) {
 pub fn show_fatal_dialog(message: &str) {
     eprintln!("{message}");
 }
+
+/// Centre of the foreground window in physical pixels: the HUD shows on the
+/// monitor the user is working on, not always on the primary one.
+#[cfg(windows)]
+pub fn foreground_window_center() -> Option<(f64, f64)> {
+    use windows::Win32::Foundation::RECT;
+    use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowRect};
+    unsafe {
+        let window = GetForegroundWindow();
+        if window.is_invalid() {
+            return None;
+        }
+        let mut rect = RECT::default();
+        GetWindowRect(window, &mut rect).ok()?;
+        Some((
+            f64::from(rect.left + rect.right) / 2.0,
+            f64::from(rect.top + rect.bottom) / 2.0,
+        ))
+    }
+}
+
+#[cfg(not(windows))]
+pub fn foreground_window_center() -> Option<(f64, f64)> {
+    None
+}

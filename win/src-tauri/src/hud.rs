@@ -56,6 +56,10 @@ impl serde::Serialize for HudPlacement {
 
 pub struct Hud {
     window: WebviewWindow,
+    style: std::sync::Mutex<(HudPlacement, WaveIntensity)>,
+    /// Bumped by every notice and every show, so a notice's timer only hides
+    /// the pill it put up.
+    generation: std::sync::Arc<std::sync::atomic::AtomicU64>,
 }
 
 impl Hud {
@@ -77,17 +81,49 @@ impl Hud {
         let builder = builder.transparent(true);
         let window = builder.build()?;
         window.set_ignore_cursor_events(true)?;
-        Ok(Self { window })
+        Ok(Self {
+            window,
+            style: std::sync::Mutex::new((HudPlacement::Bottom, WaveIntensity::Lively)),
+            generation: Default::default(),
+        })
+    }
+
+    pub fn set_style(&self, placement: HudPlacement, intensity: WaveIntensity) {
+        *self
+            .style
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = (placement, intensity);
+    }
+
+    fn current_style(&self) -> (HudPlacement, WaveIntensity) {
+        *self
+            .style
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Where the mic level goes; cloned into the realtime capture tap.
+    pub fn level_sink(&self) -> LevelSink {
+        LevelSink {
+            window: self.window.clone(),
+            feed: Default::default(),
+        }
     }
 
     /// Shows the indicator on recording, morphs it on transcribing, hides on idle.
     pub fn set_phase(&self, phase: TrayPhase) {
         let result = match phase {
             TrayPhase::Idle => self.window.hide(),
-            TrayPhase::Recording => self
-                .place()
-                .and_then(|()| self.window.eval(phase_script(phase)))
-                .and_then(|()| self.window.show()),
+            TrayPhase::Recording => {
+                self.generation
+                    .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+                let (_, intensity) = self.current_style();
+                self.place()
+                    .and_then(|()| self.window.set_ignore_cursor_events(true))
+                    .and_then(|()| self.window.eval(wave_script(intensity)))
+                    .and_then(|()| self.window.eval(phase_script(phase)))
+                    .and_then(|()| self.window.show())
+            }
             TrayPhase::Transcribing => self.window.eval(phase_script(phase)),
         };
         if let Err(error) = result {
@@ -95,26 +131,120 @@ impl Hud {
         }
     }
 
-    /// Re-anchors to the current primary monitor: displays get plugged and
-    /// unplugged between dictations, so the position is computed on every show.
-    fn place(&self) -> tauri::Result<()> {
-        let Some(monitor) = self.window.primary_monitor()? else {
-            return Ok(());
+    /// The circle widens into a pill with `text` for `duration`, then the HUD
+    /// goes away. A clickable pill (something to fix in Settings) takes the
+    /// click; `on_click` is the page's call back into `hud_notice_clicked`.
+    pub fn notice(&self, text: &str, duration: std::time::Duration, clickable: bool) {
+        use std::sync::atomic::Ordering;
+        let generation = self.generation.fetch_add(1, Ordering::AcqRel) + 1;
+        let (placement, _) = self.current_style();
+        let result = (|| -> tauri::Result<()> {
+            if let Some((area, scale)) = self.work_area()? {
+                let (x, y, width) = notice_frame(area, scale, placement, text.chars().count());
+                let height = (SIZE * scale).round() as u32;
+                self.window
+                    .set_size(PhysicalSize::new(width.max(1) as u32, height))?;
+                self.window.set_position(PhysicalPosition::new(x, y))?;
+            }
+            self.window.set_ignore_cursor_events(!clickable)?;
+            self.window
+                .eval(notice_script(text, duration.as_millis() as u64, clickable))?;
+            self.window.show()
+        })();
+        if let Err(error) = result {
+            crate::obs::log(&format!("hud notice failed: {error}"));
+            return;
+        }
+        let window = self.window.clone();
+        let current = self.generation.clone();
+        std::thread::spawn(move || {
+            // The page fades the pill out over its last 200 ms.
+            std::thread::sleep(duration + std::time::Duration::from_millis(200));
+            if current.load(Ordering::Acquire) == generation {
+                let _ = window.hide();
+                let _ = window.set_ignore_cursor_events(true);
+            }
+        });
+    }
+
+    /// The monitor the user works on: the one under the foreground window,
+    /// else the primary. Plugged and unplugged displays are re-read every time.
+    fn work_area(&self) -> tauri::Result<Option<(WorkArea, f64)>> {
+        let monitor = match crate::platform::foreground_window_center() {
+            Some((x, y)) => self.window.monitor_from_point(x, y)?,
+            None => None,
+        };
+        let Some(monitor) = monitor.or(self.window.primary_monitor()?) else {
+            return Ok(None);
         };
         let area = monitor.work_area();
-        let scale = monitor.scale_factor();
-        let size = (SIZE * scale).round() as i32;
-        let (x, y) = origin(
+        Ok(Some((
             WorkArea {
                 x: area.position.x,
                 y: area.position.y,
                 width: area.size.width as i32,
                 height: area.size.height as i32,
             },
-            size,
-            scale,
-        );
+            monitor.scale_factor(),
+        )))
+    }
+
+    fn place(&self) -> tauri::Result<()> {
+        let Some((area, scale)) = self.work_area()? else {
+            return Ok(());
+        };
+        let size = (SIZE * scale).round() as i32;
+        let (placement, _) = self.current_style();
+        let (x, y) = placed(area, size, scale, placement);
+        self.window
+            .set_size(PhysicalSize::new(size as u32, size as u32))?;
         self.window.set_position(PhysicalPosition::new(x, y))
+    }
+}
+
+/// The capture tap's handle on the HUD: turns mic blocks into levels and
+/// hands every twelfth-of-a-second one to the page.
+#[derive(Clone)]
+pub struct LevelSink {
+    window: WebviewWindow,
+    feed: std::sync::Arc<std::sync::Mutex<LevelFeed>>,
+}
+
+impl LevelSink {
+    pub fn restart(&self) {
+        self.feed
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .restart();
+    }
+
+    pub fn push(&self, samples: &[i16]) {
+        let level = self
+            .feed
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(samples);
+        if let Some(level) = level {
+            let _ = self.window.eval(level_script(level));
+        }
+    }
+}
+
+pub fn notice_text(
+    notice: sez_core::feedback::HudNotice,
+    language: crate::settings::AppLanguage,
+) -> &'static str {
+    use crate::settings::AppLanguage::{Ru, Uz};
+    use sez_core::feedback::HudNotice::{MicFailed, ModelMissing, NoText, PasteManually};
+    match (notice, language) {
+        (PasteManually, Ru) => "Текст в буфере — вставьте Ctrl+V",
+        (NoText, Ru) => "Не расслышал — запись в истории",
+        (MicFailed, Ru) => "Микрофон не записал — открыть настройки",
+        (ModelMissing, Ru) => "Модель не скачана — открыть настройки",
+        (PasteManually, Uz) => "Matn buferda — Ctrl+V bilan qoʼying",
+        (NoText, Uz) => "Eshitilmadi — yozuv tarixda",
+        (MicFailed, Uz) => "Mikrofon yozmadi — sozlamalarni ochish",
+        (ModelMissing, Uz) => "Model yuklanmagan — sozlamalarni ochish",
     }
 }
 
@@ -442,7 +572,10 @@ mod tests {
             height: 1040,
         };
         let (x, y, width) = notice_frame(area, 1.0, HudPlacement::Bottom, 20);
-        assert_eq!(width, (20.0 * NOTICE_CHAR_PX + NOTICE_PADDING_PX).round() as i32);
+        assert_eq!(
+            width,
+            (20.0 * NOTICE_CHAR_PX + NOTICE_PADDING_PX).round() as i32
+        );
         assert_eq!(x, (1920 - width) / 2);
         assert_eq!(y, origin(area, 72, 1.0).1);
         let (_, _, capped) = notice_frame(area, 1.0, HudPlacement::Bottom, 500);
