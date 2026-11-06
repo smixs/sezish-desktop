@@ -6,6 +6,58 @@
 //! clipboard and the HUD says «вставьте ⌘V» — the same here with Ctrl+V,
 //! which the user's own keyboard may still send.
 
+/// Mandatory integrity level of a process token, by its RID.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum IntegrityLevel {
+    Untrusted,
+    Low,
+    Medium,
+    High,
+    System,
+}
+
+impl IntegrityLevel {
+    pub fn from_rid(rid: u32) -> Self {
+        match rid {
+            0x4000.. => Self::System,
+            0x3000.. => Self::High,
+            0x2000.. => Self::Medium,
+            0x1000.. => Self::Low,
+            _ => Self::Untrusted,
+        }
+    }
+}
+
+/// True when Windows will silently drop our synthetic input into `target`.
+pub fn input_blocked(own: IntegrityLevel, target: IntegrityLevel) -> bool {
+    target > own
+}
+
+/// A registered clipboard format set next to the text; `dword` is its data.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Marker {
+    pub format: &'static str,
+    pub dword: Option<u32>,
+}
+
+/// Formats that keep a dictation out of clipboard managers and Win+V history.
+pub fn clipboard_markers() -> [Marker; 3] {
+    [
+        Marker {
+            format: "ExcludeClipboardContentFromMonitorProcessing",
+            dword: None,
+        },
+        Marker {
+            format: "CanIncludeInClipboardHistory",
+            dword: Some(0),
+        },
+        Marker {
+            format: "CanUploadToCloudClipboard",
+            dword: Some(0),
+        },
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::{clipboard_markers, input_blocked, IntegrityLevel, Marker};

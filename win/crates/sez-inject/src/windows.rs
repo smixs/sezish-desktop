@@ -70,7 +70,112 @@ impl Clipboard for WinClipboard {
         }
         if unsafe { SetClipboardData(CF_UNICODETEXT.0 as u32, Some(HANDLE(global.0))) }.is_err() {
             free_global(global);
+            return;
         }
+        set_markers();
+    }
+}
+
+/// Stamps the open clipboard with the formats that keep it out of history.
+fn set_markers() {
+    use windows::Win32::System::DataExchange::RegisterClipboardFormatW;
+    for marker in crate::guard::clipboard_markers() {
+        let name: Vec<u16> = marker.format.encode_utf16().chain(Some(0)).collect();
+        let format = unsafe { RegisterClipboardFormatW(windows::core::PCWSTR(name.as_ptr())) };
+        if format == 0 {
+            continue;
+        }
+        let bytes = marker
+            .dword
+            .map_or(0, |_| std::mem::size_of::<u32>())
+            .max(1);
+        let Ok(global) = (unsafe { GlobalAlloc(GMEM_MOVEABLE, bytes) }) else {
+            continue;
+        };
+        let pointer = unsafe { GlobalLock(global) }.cast::<u8>();
+        if pointer.is_null() {
+            free_global(global);
+            continue;
+        }
+        unsafe {
+            match marker.dword {
+                Some(value) => std::ptr::copy_nonoverlapping(
+                    value.to_le_bytes().as_ptr(),
+                    pointer,
+                    std::mem::size_of::<u32>(),
+                ),
+                None => *pointer = 0,
+            }
+            let _ = GlobalUnlock(global);
+        }
+        if unsafe { SetClipboardData(format, Some(HANDLE(global.0))) }.is_err() {
+            free_global(global);
+        }
+    }
+}
+
+/// Integrity level of a process token: ours, or the foreground window's owner.
+fn token_level(
+    process: windows::Win32::Foundation::HANDLE,
+) -> Option<crate::guard::IntegrityLevel> {
+    use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::Security::{
+        GetSidSubAuthority, GetSidSubAuthorityCount, GetTokenInformation, TokenIntegrityLevel,
+        TOKEN_MANDATORY_LABEL, TOKEN_QUERY,
+    };
+    use windows::Win32::System::Threading::OpenProcessToken;
+    unsafe {
+        let mut token = HANDLE::default();
+        OpenProcessToken(process, TOKEN_QUERY, &mut token).ok()?;
+        let mut buffer = [0u8; 128];
+        let mut length = 0u32;
+        let read = GetTokenInformation(
+            token,
+            TokenIntegrityLevel,
+            Some(buffer.as_mut_ptr().cast()),
+            buffer.len() as u32,
+            &mut length,
+        );
+        let _ = CloseHandle(token);
+        read.ok()?;
+        let label = &*(buffer.as_ptr().cast::<TOKEN_MANDATORY_LABEL>());
+        let sid = label.Label.Sid;
+        let count = *GetSidSubAuthorityCount(sid);
+        if count == 0 {
+            return None;
+        }
+        let rid = *GetSidSubAuthority(sid, u32::from(count - 1));
+        Some(crate::guard::IntegrityLevel::from_rid(rid))
+    }
+}
+
+/// True when the window that has the caret belongs to a process above us
+/// (run as administrator): our events would be dropped without an error.
+pub fn foreground_blocks_input() -> bool {
+    use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::System::Threading::{
+        GetCurrentProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
+    let Some(own) = token_level(unsafe { GetCurrentProcess() }) else {
+        return false;
+    };
+    unsafe {
+        let window = GetForegroundWindow();
+        if window.is_invalid() {
+            return false;
+        }
+        let mut pid = 0u32;
+        GetWindowThreadProcessId(window, Some(&mut pid));
+        if pid == 0 {
+            return false;
+        }
+        let Ok(process) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) else {
+            return false;
+        };
+        let target = token_level(process);
+        let _ = CloseHandle(process);
+        target.is_some_and(|target| crate::guard::input_blocked(own, target))
     }
 }
 
@@ -146,6 +251,14 @@ impl Default for WindowsInserter {
 impl Inserter for WindowsInserter {
     /// Empty text is inserted as nothing at all: no events, no clipboard write.
     async fn insert(&self, text: &str) -> Result<(), SezError> {
+        if !text.is_empty() && foreground_blocks_input() {
+            // Typing or pasting into it would vanish: hand the text over instead.
+            WinClipboard.set_text(text);
+            return Err(SezError::Other(
+                "the focused window runs as administrator - the dictation is on your clipboard"
+                    .to_owned(),
+            ));
+        }
         if choose_route(text) == InsertRoute::Type {
             let typed = text.to_owned();
             let outcome = tokio::task::spawn_blocking(move || send_typed_text(&typed))
