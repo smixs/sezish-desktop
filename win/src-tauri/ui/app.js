@@ -1,136 +1,210 @@
 "use strict";
 
+// Texts follow the Mac app (Localization.swift, SettingsStrings.swift); only the
+// Windows-specific lines differ («компьютер» for «Мак», Ctrl, Explorer).
 const strings = {
   ru: {
-    dictations: "Диктовки",
-    openFolder: "Открыть папку",
-    emptyYet: "Пока пусто",
-    noTextRow: "🎙 без текста — открыть запись",
-    checkUpdates: "Проверить обновления",
-    downloadModel: "Скачать модель (215 МБ)",
-    downloadingModel: "Скачивание модели…",
-    modelInstalled: "Модель установлена",
-    recognition: "Распознавание",
-    cloudTitle: "Облако",
-    cloudSubtitle: "Быстро и без скачиваний. Нужен интернет",
-    cloudUnavailable: "Недоступно в этой сборке",
-    localTitle: "Локально",
-    localSubtitle: "Офлайн, речь не покидает компьютер. Модель 215 МБ",
-    modelSection: "Модель",
-    modelMultiTitle: "Русский, узбекский, казахский, кыргызский",
-    modelMultiSubtitle: "Без знаков препинания. 215 МБ",
-    modelRuEnTitle: "Русский и английский",
-    modelRuEnSubtitle: "Знаки препинания и заглавные буквы. 225 МБ",
-    language: "Язык",
     general: "Общие",
-    launchAtLogin: "Запуск при входе",
-    soundsToggle: "Звуки",
-    paneHotkey: "Горячая клавиша",
-    hotkeySection: "Горячая клавиша диктовки",
-    holdModeToggle: "Запись при удержании клавиши",
+    paneHistory: "История",
+    quit: "Выйти из sezish",
+    version: "Версия",
+    checkUpdates: "Проверить обновления",
+    shortcutLabel: "Клавиша диктовки",
+    shortcutMode: "Режим клавиши",
+    modeHold: "Удерживать",
+    modeToggle: "Нажать",
     hotkeyModeHoldHint: "Запись идёт, пока клавиша удержана",
     hotkeyModeToggleHint: "Нажмите — начать, ещё раз — остановить. Esc — отмена",
-    shortcutLabel: "Сочетание клавиш",
-    recorderPrompt: "Нажмите клавишу…  (Esc — отмена)",
+    recorderPrompt: "Нажмите клавишу…",
     recorderNeedsModifier: "Добавьте Ctrl, Alt, Shift или Win",
     rightShiftWarning:
       "Правый Shift дольше 8 секунд включает системную «Фильтрацию ввода» и обрывает диктовку. Выберите другую клавишу.",
     keyLeft: "Левый",
     keyRight: "Правый",
-    paneUpdates: "Обновления",
-    updatesVersion: "Версия",
-    settingsItem: "Настройки",
-    previewMode: "Режим предпросмотра — sezish не запущен",
+    recognition: "Распознавание",
+    waveIntensity: "Волна при диктовке",
+    waveCalm: "Спокойно",
+    waveLively: "Живее",
+    waveBold: "Дерзко",
+    hudPlacement: "Место плашки",
+    hudBottom: "Внизу",
+    hudTop: "Сверху",
+    soundsToggle: "Звуки",
+    soundVolume: "Громкость звуков",
+    launchAtLogin: "Запуск при входе",
+    advanced: "Дополнительно",
+    language: "Язык",
+    cloudTitle: "Облако",
+    cloudSubtitle: "Быстро и без скачиваний. Нужен интернет",
+    cloudUnavailable: "Облако недоступно в этой сборке",
+    localTitle: "Локально",
+    localSubtitle: "Офлайн, речь не покидает компьютер",
+    geminiTitle: "Gemini",
+    geminiSubtitle: "Через Google на вашем ключе. Нужен ключ Google AI Studio",
+    geminiSection: "Gemini",
+    geminiSmartTitle: "Умная расшифровка",
+    geminiSmartSubtitle:
+      "Убирает слова-паразиты и мат, расставляет пунктуацию. Выключите для дословного текста",
+    geminiFooter: "Ключ хранится на этом компьютере и уходит только в Google",
+    openaiTitle: "OpenAI",
+    openaiSubtitle: "Запись уходит в OpenAI после отпускания клавиши. Нужен ключ OpenAI",
+    openaiModelTranscribe: "GPT Transcribe",
+    openaiModelTranscribeHint: "Точнее, около $0.005 за минуту",
+    openaiModelMini: "GPT-4o mini Transcribe",
+    openaiModelMiniHint: "Дешевле, около $0.003 за минуту. OpenAI отключит её 26 февраля 2027",
+    openaiFooter: "Ключ хранится на этом компьютере и уходит только в OpenAI",
+    keyLabel: "Ключ API",
+    keyPlaceholder: "Вставьте ключ",
+    keySaved: "Ключ сохранён",
+    deleteKey: "Удалить ключ",
+    getKey: "Получить ключ",
+    keyMissing: "Без ключа диктовка идёт через облако или локальную модель",
+    modelSection: "Модель",
+    modelMultiTitle: "Русский, узбекский, казахский, кыргызский",
+    modelMultiSubtitle: "Без знаков препинания. 215 МБ",
+    modelRuEnTitle: "Русский и английский",
+    modelRuEnSubtitle: "Знаки препинания и заглавные буквы. 225 МБ",
+    modelFooter: "Модель работает на этом компьютере, без интернета",
+    downloadModel: "Скачать модель",
+    downloadingModel: "Скачивание модели…",
+    modelInstalled: "Модель установлена",
+    openFolder: "Открыть папку",
+    search: "Поиск",
+    nothingFound: "Ничего не найдено",
+    emptyYet: "Пока пусто: продиктуйте что-нибудь, и текст появится здесь",
+    noText: "Без текста — запись в папке",
+    today: "Сегодня",
+    yesterday: "Вчера",
+    copy: "Скопировать",
+    copied: "Скопировано",
+    previewMode: "Предпросмотр: sezish не запущен",
     dismiss: "Закрыть",
-    previewUpdateStatus: "В режиме предпросмотра обновлений нет"
+    previewUpdateStatus: "В предпросмотре обновлений нет"
   },
   uz: {
-    dictations: "Diktovkalar",
-    openFolder: "Papkani ochish",
-    emptyYet: "Hozircha boʼsh",
-    noTextRow: "🎙 matn yoʼq — yozuvni ochish",
-    checkUpdates: "Yangilanishlarni tekshirish",
-    downloadModel: "Modelni yuklab olish (215 MB)",
-    downloadingModel: "Model yuklanmoqda…",
-    modelInstalled: "Model oʼrnatilgan",
-    recognition: "Nutqni aniqlash",
-    cloudTitle: "Bulut",
-    cloudSubtitle: "Tez, yuklab olishsiz. Internet kerak",
-    cloudUnavailable: "Bu versiyada mavjud emas",
-    localTitle: "Qurilmada",
-    localSubtitle: "Oflayn, nutq kompyuterdan chiqmaydi. Model 215 MB",
-    modelSection: "Model",
-    modelMultiTitle: "Rus, oʼzbek, qozoq, qirgʼiz",
-    modelMultiSubtitle: "Tinish belgilarisiz. 215 MB",
-    modelRuEnTitle: "Rus va ingliz",
-    modelRuEnSubtitle: "Tinish belgilari va bosh harflar bilan. 225 MB",
-    language: "Til",
     general: "Umumiy",
-    launchAtLogin: "Kirishda ishga tushirish",
-    soundsToggle: "Tovushlar",
-    paneHotkey: "Tezkor tugma",
-    hotkeySection: "Diktovka uchun tezkor tugma",
-    holdModeToggle: "Tugma bosib turilganda yozish",
+    paneHistory: "Tarix",
+    quit: "sezishdan chiqish",
+    version: "Versiya",
+    checkUpdates: "Yangilanishlarni tekshirish",
+    shortcutLabel: "Diktovka tugmasi",
+    shortcutMode: "Tugma rejimi",
+    modeHold: "Bosib turish",
+    modeToggle: "Bosish",
     hotkeyModeHoldHint: "Yozish tugma bosib turilganda davom etadi",
     hotkeyModeToggleHint: "Bosing — boshlash, yana bosing — toʼxtatish. Esc — bekor qilish",
-    shortcutLabel: "Tugmalar birikmasi",
-    recorderPrompt: "Tugmani bosing…  (Esc - bekor)",
+    recorderPrompt: "Tugmani bosing…",
     recorderNeedsModifier: "Ctrl, Alt, Shift yoki Win qoʼshing",
     rightShiftWarning:
       "Oʼng Shift 8 soniyadan uzoq bosib turilsa, tizim «Kirish filtri»ni yoqadi va diktovkani uzadi. Boshqa tugmani tanlang.",
     keyLeft: "Chap",
     keyRight: "Oʼng",
-    paneUpdates: "Yangilanishlar",
-    updatesVersion: "Versiya",
-    settingsItem: "Sozlamalar",
-    previewMode: "Koʼrib chiqish rejimi — sezish ishga tushmagan",
+    recognition: "Nutqni aniqlash",
+    waveIntensity: "Diktovkadagi toʼlqin",
+    waveCalm: "Sokin",
+    waveLively: "Jonli",
+    waveBold: "Shiddatli",
+    hudPlacement: "Plashka joyi",
+    hudBottom: "Pastda",
+    hudTop: "Tepada",
+    soundsToggle: "Tovushlar",
+    soundVolume: "Tovushlar balandligi",
+    launchAtLogin: "Kirishda ishga tushirish",
+    advanced: "Qoʼshimcha",
+    language: "Til",
+    cloudTitle: "Bulut",
+    cloudSubtitle: "Tez, yuklab olishsiz. Internet kerak",
+    cloudUnavailable: "Bulut bu versiyada mavjud emas",
+    localTitle: "Qurilmada",
+    localSubtitle: "Oflayn, nutq kompyuterdan chiqmaydi",
+    geminiTitle: "Gemini",
+    geminiSubtitle: "Google orqali, oʼz kalitingiz bilan. Google AI Studio kaliti kerak",
+    geminiSection: "Gemini",
+    geminiSmartTitle: "Aqlli matn",
+    geminiSmartSubtitle:
+      "Ortiqcha soʼzlar va soʼkinishni olib tashlaydi, tinish belgilarini qoʼyadi. Soʼzma-soʼz matn uchun oʼchiring",
+    geminiFooter: "Kalit shu kompyuterda saqlanadi va faqat Googlega yuboriladi",
+    openaiTitle: "OpenAI",
+    openaiSubtitle: "Tugma qoʼyib yuborilgach, yozuv OpenAIga yuboriladi. OpenAI kaliti kerak",
+    openaiModelTranscribe: "GPT Transcribe",
+    openaiModelTranscribeHint: "Aniqroq, daqiqasi taxminan $0.005",
+    openaiModelMini: "GPT-4o mini Transcribe",
+    openaiModelMiniHint: "Arzonroq, daqiqasi taxminan $0.003. OpenAI uni 2027-yil 26-fevralda oʼchiradi",
+    openaiFooter: "Kalit shu kompyuterda saqlanadi va faqat OpenAIga yuboriladi",
+    keyLabel: "API kaliti",
+    keyPlaceholder: "Kalitni joylashtiring",
+    keySaved: "Kalit saqlangan",
+    deleteKey: "Kalitni oʼchirish",
+    getKey: "Kalit olish",
+    keyMissing: "Kalitsiz diktovka bulut yoki qurilmadagi model orqali ishlaydi",
+    modelSection: "Model",
+    modelMultiTitle: "Rus, oʼzbek, qozoq, qirgʼiz",
+    modelMultiSubtitle: "Tinish belgilarisiz. 215 MB",
+    modelRuEnTitle: "Rus va ingliz",
+    modelRuEnSubtitle: "Tinish belgilari va bosh harflar bilan. 225 MB",
+    modelFooter: "Model shu kompyuterda, internetsiz ishlaydi",
+    downloadModel: "Modelni yuklab olish",
+    downloadingModel: "Model yuklanmoqda…",
+    modelInstalled: "Model oʼrnatilgan",
+    openFolder: "Papkani ochish",
+    search: "Qidiruv",
+    nothingFound: "Hech narsa topilmadi",
+    emptyYet: "Hozircha boʼsh: biror narsa ayting, matn shu yerda paydo boʼladi",
+    noText: "Matnsiz — yozuv papkada",
+    today: "Bugun",
+    yesterday: "Kecha",
+    copy: "Nusxalash",
+    copied: "Nusxalandi",
+    previewMode: "Koʼrib chiqish: sezish ishga tushmagan",
     dismiss: "Yopish",
-    previewUpdateStatus: "Koʼrib chiqish rejimida yangilanish yoʼq"
+    previewUpdateStatus: "Koʼrib chiqishda yangilanish yoʼq"
   }
 };
 
+const now = Math.floor(Date.now() / 1000);
 const fixture = {
   settings: {
     hotkey_mode: "hold",
     shortcut: { kind: "modifier", vk: 163 },
-    transcription_mode: "cloud",
+    transcription_mode: "local",
     effective_transcription_mode: "local",
     local_model: "multilingual",
     language: null,
     resolved_language: "ru",
     play_sounds: true,
+    sound_volume: 50,
+    openai_api_key_set: false,
+    openai_model: "gpt-transcribe",
+    gemini_api_key_set: false,
+    gemini_smart_mode: true,
+    hud_placement: "bottom",
+    wave_intensity: "lively",
+    cloud_available: true,
     autostart_enabled: false
   },
   history: [
-    {
-      text: "Завтра созвон в десять, подготовить короткий статус.",
-      recorded_at: 1785169800
-    },
-    {
-      text: "",
-      recorded_at: 1785080700
-    }
+    { text: "Завтра созвон в десять, подготовить короткий статус.", recorded_at: now - 600 },
+    { text: "", recorded_at: now - 3_000 },
+    { text: "Ertaga soat oʼnda qoʼngʼiroq bor.", recorded_at: now - 90_000 }
   ],
-  modelStatus: {
-    kind: "missing"
-  },
-  version: "0.0.1-preview",
-  lastCopiedIndex: null,
-  historyFolderOpened: false
+  modelStatus: { kind: "ready" },
+  version: "0.1.10-preview"
 };
 
 const tauriGlobal = window.__TAURI__;
 const tauriInvoke =
-  tauriGlobal &&
-  tauriGlobal.core &&
-  typeof tauriGlobal.core.invoke === "function"
+  tauriGlobal && tauriGlobal.core && typeof tauriGlobal.core.invoke === "function"
     ? tauriGlobal.core.invoke.bind(tauriGlobal.core)
     : null;
 
 const state = {
+  pane: "general",
+  advancedOpen: false,
   language: fixture.settings.resolved_language,
   settings: { ...fixture.settings },
   history: fixture.history.map((entry) => ({ ...entry })),
+  query: "",
+  copiedIndex: null,
   modelStatus: { ...fixture.modelStatus },
   version: fixture.version,
   previewBannerVisible: !tauriInvoke,
@@ -149,65 +223,46 @@ function byId(id) {
   return document.getElementById(id);
 }
 
+function all(selector) {
+  return Array.from(document.querySelectorAll(selector));
+}
+
 function cacheElements() {
-  const ids = [
+  [
     "preview-banner",
-    "preview-message",
     "dismiss-preview",
-    "page-title",
-    "general-heading",
-    "general-error",
-    "language-label",
-    "language-uz",
-    "language-ru",
-    "language-error",
-    "autostart-toggle",
-    "autostart-label",
-    "autostart-error",
-    "sounds-toggle",
-    "sounds-label",
-    "sounds-error",
-    "hotkey-heading",
-    "hotkey-section-label",
-    "hotkey-toggle",
-    "hotkey-toggle-label",
-    "hotkey-hint",
-    "shortcut-label",
-    "shortcut-recorder",
-    "shortcut-value",
-    "shortcut-warning",
-    "hotkey-error",
-    "recognition-heading",
-    "mode-cloud",
-    "mode-local",
-    "cloud-title",
-    "cloud-subtitle",
-    "cloud-unavailable",
-    "local-title",
-    "local-subtitle",
-    "recognition-error",
-    "model-section",
-    "model-section-label",
-    "model-multilingual",
-    "model-multilingual-title",
-    "model-multilingual-subtitle",
-    "model-ru-en-punctuated",
-    "model-ru-en-punctuated-title",
-    "model-ru-en-punctuated-subtitle",
-    "model-status",
-    "model-error",
-    "history-heading",
-    "open-folder",
-    "history-list",
-    "history-error",
-    "updates-heading",
-    "version-label",
+    "quit",
     "version-value",
     "check-updates",
     "updates-status",
-    "updates-error"
-  ];
-  ids.forEach((id) => {
+    "shortcut-recorder",
+    "shortcut-value",
+    "shortcut-warning",
+    "hotkey-hint",
+    "open-recognition",
+    "engine-name",
+    "sound-volume",
+    "sounds-toggle",
+    "autostart-toggle",
+    "advanced-toggle",
+    "advanced-card",
+    "back-to-general",
+    "cloud-unavailable",
+    "gemini-section",
+    "gemini-key",
+    "gemini-key-clear",
+    "gemini-smart",
+    "gemini-footer",
+    "openai-section",
+    "openai-key",
+    "openai-key-clear",
+    "openai-footer",
+    "model-section",
+    "model-status",
+    "open-folder",
+    "history-search",
+    "history-list"
+  ].forEach((id) => {
     elements[id] = byId(id);
   });
 }
@@ -234,129 +289,167 @@ function errorMessage(error) {
   return String(error || "Unknown error");
 }
 
+// Several controls report into one line under their card.
+const ERROR_SLOT = { hotkey: "controls", sounds: "controls", autostart: "controls", language: "controls" };
+
 function setError(scope, error) {
-  state.errors[scope] = error ? errorMessage(error) : "";
+  state.errors[ERROR_SLOT[scope] || scope] = error ? errorMessage(error) : "";
   renderErrors();
 }
 
 function renderErrors() {
-  const errorElements = {
-    general: elements["general-error"],
-    language: elements["language-error"],
-    autostart: elements["autostart-error"],
-    sounds: elements["sounds-error"],
-    hotkey: elements["hotkey-error"],
-    recognition: elements["recognition-error"],
-    model: elements["model-error"],
-    history: elements["history-error"],
-    updates: elements["updates-error"]
-  };
-  Object.entries(errorElements).forEach(([scope, element]) => {
-    const message = state.errors[scope] || "";
+  all("[data-error]").forEach((element) => {
+    const message = state.errors[element.dataset.error] || "";
     element.textContent = message;
     element.hidden = !message;
   });
 }
 
+// ---------------------------------------------------------------- render --
+
 function renderText() {
   const t = currentStrings();
   document.documentElement.lang = state.language;
-  elements["preview-message"].textContent = t.previewMode;
-  elements["dismiss-preview"].setAttribute("aria-label", t.dismiss);
-  elements["page-title"].textContent = t.settingsItem;
-  elements["general-heading"].textContent = t.general;
-  elements["language-label"].textContent = t.language;
-  elements["autostart-label"].textContent = t.launchAtLogin;
-  elements["sounds-label"].textContent = t.soundsToggle;
-  elements["hotkey-heading"].textContent = t.paneHotkey;
-  elements["hotkey-section-label"].textContent = t.hotkeySection;
-  elements["hotkey-toggle-label"].textContent = t.holdModeToggle;
-  elements["hotkey-hint"].textContent =
-    state.settings.hotkey_mode === "hold"
-      ? t.hotkeyModeHoldHint
-      : t.hotkeyModeToggleHint;
-  elements["shortcut-label"].textContent = t.shortcutLabel;
-  elements["recognition-heading"].textContent = t.recognition;
-  elements["cloud-title"].textContent = t.cloudTitle;
-  elements["cloud-subtitle"].textContent = t.cloudSubtitle;
-  elements["cloud-unavailable"].textContent = t.cloudUnavailable;
-  elements["local-title"].textContent = t.localTitle;
-  elements["local-subtitle"].textContent = t.localSubtitle;
-  elements["model-section-label"].textContent = t.modelSection;
-  elements["model-multilingual-title"].textContent = t.modelMultiTitle;
-  elements["model-multilingual-subtitle"].textContent = t.modelMultiSubtitle;
-  elements["model-ru-en-punctuated-title"].textContent = t.modelRuEnTitle;
-  elements["model-ru-en-punctuated-subtitle"].textContent = t.modelRuEnSubtitle;
-  elements["history-heading"].textContent = t.dictations;
-  elements["open-folder"].textContent = t.openFolder;
-  elements["updates-heading"].textContent = t.paneUpdates;
-  elements["version-label"].textContent = t.updatesVersion;
-  elements["check-updates"].textContent = t.checkUpdates;
+  all("[data-t]").forEach((element) => {
+    const text = t[element.dataset.t];
+    if (text !== undefined) {
+      element.textContent = text;
+    }
+  });
+  all("[data-t-label]").forEach((element) => {
+    const text = t[element.dataset.tLabel];
+    if (text !== undefined) {
+      element.setAttribute("aria-label", text);
+    }
+  });
+  elements["history-search"].placeholder = t.search;
   if (state.updateMessageIsPreview) {
     state.updateMessage = t.previewUpdateStatus;
   }
   elements["updates-status"].textContent = state.updateMessage;
+  elements["version-value"].textContent = state.version;
 }
 
-function renderControls() {
+function check(elementsList, isOn) {
+  elementsList.forEach((element) => {
+    element.setAttribute("aria-checked", String(isOn(element)));
+  });
+}
+
+function engineTitle(mode, t) {
+  return {
+    cloud: t.cloudTitle,
+    local: t.localTitle,
+    gemini: t.geminiTitle,
+    openai: t.openaiTitle
+  }[mode];
+}
+
+/// The CHOSEN mode, not the effective one (Mac `RecognitionPane.modeBinding`):
+/// picking Gemini before pasting a key must keep the radio on Gemini, or the key
+/// field it opens would close under the cursor. A build without the cloud reads
+/// a cloud choice as local.
+function chosenMode() {
   const settings = state.settings;
-  elements["language-uz"].setAttribute(
-    "aria-checked",
-    String(state.language === "uz")
-  );
-  elements["language-ru"].setAttribute(
-    "aria-checked",
-    String(state.language === "ru")
-  );
-  elements["autostart-toggle"].checked = settings.autostart_enabled;
-  elements["sounds-toggle"].checked = settings.play_sounds;
-  elements["hotkey-toggle"].checked = settings.hotkey_mode === "hold";
-  if (!recorder.active) {
-    elements["shortcut-value"].textContent = formatShortcut(
-      settings.shortcut,
-      currentStrings()
-    );
-  }
-  const rightShiftPicked =
-    state.rightShiftRejected ||
-    (Boolean(settings.shortcut) &&
-      settings.shortcut.kind === "modifier" &&
-      settings.shortcut.vk === MODIFIER_CODES.ShiftRight);
-  elements["shortcut-warning"].textContent = rightShiftPicked
-    ? currentStrings().rightShiftWarning
-    : "";
-  elements["shortcut-warning"].hidden = !rightShiftPicked;
-  elements["mode-cloud"].setAttribute(
-    "aria-checked",
-    String(settings.transcription_mode === "cloud")
-  );
-  elements["mode-local"].setAttribute(
-    "aria-checked",
-    String(settings.transcription_mode === "local")
-  );
-  elements["cloud-unavailable"].hidden = !(
-    settings.transcription_mode !== settings.effective_transcription_mode &&
-    settings.transcription_mode === "cloud"
-  );
-  elements["model-section"].hidden =
-    settings.effective_transcription_mode !== "local";
-  elements["model-multilingual"].setAttribute(
-    "aria-checked",
-    String(settings.local_model !== "ru-en-punctuated")
-  );
-  elements["model-ru-en-punctuated"].setAttribute(
-    "aria-checked",
-    String(settings.local_model === "ru-en-punctuated")
-  );
+  return settings.transcription_mode === "cloud" && !settings.cloud_available
+    ? "local"
+    : settings.transcription_mode;
 }
 
-function createModelButton() {
-  const button = document.createElement("button");
-  button.type = "button";
-  button.className = "primary-button";
-  button.textContent = currentStrings().downloadModel;
-  button.addEventListener("click", downloadModel);
-  return button;
+function renderPanes() {
+  const pane = state.pane;
+  byId("pane-general").hidden = pane !== "general";
+  byId("pane-recognition").hidden = pane !== "recognition";
+  byId("pane-history").hidden = pane !== "history";
+  const navPane = pane === "recognition" ? "general" : pane;
+  all(".nav-item").forEach((item) => {
+    if (item.dataset.pane === navPane) {
+      item.setAttribute("aria-current", "page");
+    } else {
+      item.removeAttribute("aria-current");
+    }
+  });
+}
+
+function renderGeneral() {
+  const t = currentStrings();
+  const settings = state.settings;
+  if (!recorder.active) {
+    elements["shortcut-value"].textContent = formatShortcut(settings.shortcut, t);
+  }
+  const rightShiftPicked = state.rightShiftRejected || isRightShift(settings.shortcut);
+  elements["shortcut-warning"].textContent = rightShiftPicked ? t.rightShiftWarning : "";
+  elements["shortcut-warning"].hidden = !rightShiftPicked;
+
+  check(all("[data-hotkey-mode]"), (el) => el.dataset.hotkeyMode === settings.hotkey_mode);
+  elements["hotkey-hint"].textContent =
+    settings.hotkey_mode === "hold" ? t.hotkeyModeHoldHint : t.hotkeyModeToggleHint;
+  elements["engine-name"].textContent = engineTitle(settings.effective_transcription_mode, t);
+  check(all("[data-wave]"), (el) => el.dataset.wave === settings.wave_intensity);
+  check(all("[data-placement]"), (el) => el.dataset.placement === settings.hud_placement);
+
+  const volume = elements["sound-volume"];
+  if (document.activeElement !== volume) {
+    volume.value = String(settings.sound_volume);
+  }
+  volume.style.setProperty("--fill", `${volume.value}%`);
+  volume.disabled = !settings.play_sounds;
+  elements["sounds-toggle"].checked = settings.play_sounds;
+  elements["autostart-toggle"].checked = settings.autostart_enabled;
+
+  elements["advanced-toggle"].setAttribute("aria-expanded", String(state.advancedOpen));
+  elements["advanced-card"].hidden = !state.advancedOpen;
+  check(all("[data-language]"), (el) => el.dataset.language === state.language);
+}
+
+function renderKeyField(input, clear, isSet, t) {
+  input.placeholder = isSet ? `${t.keySaved} ••••` : t.keyPlaceholder;
+  clear.hidden = !isSet;
+}
+
+function renderRecognition() {
+  const t = currentStrings();
+  const settings = state.settings;
+  const mode = chosenMode();
+  const cloudRow = document.querySelector('[data-mode="cloud"]');
+  // Without baked credentials the cloud is not offered at all; the footer
+  // explains the absence instead of a dead radio button.
+  cloudRow.hidden = !settings.cloud_available;
+  elements["cloud-unavailable"].hidden = settings.cloud_available;
+  check(all("[data-mode]"), (el) => el.dataset.mode === mode);
+
+  elements["gemini-section"].hidden = mode !== "gemini";
+  renderKeyField(elements["gemini-key"], elements["gemini-key-clear"], settings.gemini_api_key_set, t);
+  elements["gemini-smart"].checked = settings.gemini_smart_mode;
+  renderFooter(elements["gemini-footer"], settings.gemini_api_key_set, t.geminiFooter, t);
+
+  elements["openai-section"].hidden = mode !== "openai";
+  renderKeyField(elements["openai-key"], elements["openai-key-clear"], settings.openai_api_key_set, t);
+  check(all("[data-openai-model]"), (el) => el.dataset.openaiModel === settings.openai_model);
+  renderFooter(elements["openai-footer"], settings.openai_api_key_set, t.openaiFooter, t);
+
+  elements["model-section"].hidden = settings.effective_transcription_mode !== "local";
+  check(all("[data-model]"), (el) =>
+    el.dataset.model === (settings.local_model === "ru-en-punctuated" ? "ru-en-punctuated" : "multilingual")
+  );
+  renderModel();
+}
+
+/// No key means dictation silently runs somewhere else — said in red, the way a
+/// failed model download is reported (Mac).
+function renderFooter(element, keySet, footer, t) {
+  element.textContent = keySet ? footer : t.keyMissing;
+  element.classList.toggle("is-warning", !keySet);
+}
+
+function iconUse(name) {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("class", "icon");
+  svg.setAttribute("aria-hidden", "true");
+  const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
+  use.setAttribute("href", `#i-${name}`);
+  svg.append(use);
+  return svg;
 }
 
 function renderModel() {
@@ -368,27 +461,24 @@ function renderModel() {
   if (status.kind === "ready") {
     const ready = document.createElement("div");
     ready.className = "model-ready";
-    const dot = document.createElement("span");
-    dot.className = "ready-dot";
-    dot.setAttribute("aria-hidden", "true");
     const label = document.createElement("span");
     label.textContent = t.modelInstalled;
-    ready.append(dot, label);
+    ready.append(iconUse("check"), label);
     container.append(ready);
     return;
   }
 
   if (status.kind === "downloading") {
     const fraction = Math.min(1, Math.max(0, Number(status.fraction) || 0));
-    const row = document.createElement("div");
-    row.className = "model-status-row";
+    const progress = document.createElement("div");
+    progress.className = "model-progress";
+    const line = document.createElement("div");
+    line.className = "model-progress-line";
     const label = document.createElement("span");
     label.textContent = t.downloadingModel;
     const percent = document.createElement("span");
-    percent.className = "version-value";
     percent.textContent = `${Math.floor(fraction * 100)} %`;
-    row.append(label, percent);
-
+    line.append(label, percent);
     const track = document.createElement("div");
     track.className = "progress-track";
     track.setAttribute("role", "progressbar");
@@ -397,72 +487,117 @@ function renderModel() {
     track.setAttribute("aria-valuenow", String(Math.floor(fraction * 100)));
     const fill = document.createElement("div");
     fill.className = "progress-fill";
-    fill.style.width = `${fraction * 100}%`;
+    fill.style.transform = `scaleX(${fraction})`;
     track.append(fill);
-    container.append(row, track);
+    progress.append(line, track);
+    container.append(progress);
     return;
   }
 
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "primary-button";
+  button.textContent = t.downloadModel;
+  button.addEventListener("click", downloadModel);
   if (status.kind === "failed") {
     const message = document.createElement("div");
     message.className = "model-failure";
     message.textContent = status.message || "";
-    container.append(message, createModelButton());
+    container.append(message, button);
     return;
   }
-
-  container.append(createModelButton());
+  const spacer = document.createElement("div");
+  spacer.className = "model-failure";
+  container.append(spacer, button);
 }
 
-function formatTimestamp(seconds) {
-  const value = Number(seconds);
-  if (!Number.isFinite(value)) {
-    return "";
-  }
+// ------------------------------------------------------------- history --
+
+function dayKey(seconds) {
+  const date = new Date(seconds * 1000);
+  return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+}
+
+function dayLabel(seconds, t) {
+  const date = new Date(seconds * 1000);
+  const today = new Date();
+  const yesterday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1);
+  if (dayKey(seconds) === dayKey(today.getTime() / 1000)) return t.today;
+  if (dayKey(seconds) === dayKey(yesterday.getTime() / 1000)) return t.yesterday;
   return new Intl.DateTimeFormat(state.language === "uz" ? "uz-UZ" : "ru-RU", {
-    dateStyle: "short",
-    timeStyle: "short"
-  }).format(new Date(value * 1000));
+    day: "numeric",
+    month: "long"
+  }).format(date);
+}
+
+function timeLabel(seconds) {
+  return new Intl.DateTimeFormat("ru-RU", { hour: "2-digit", minute: "2-digit" }).format(
+    new Date(seconds * 1000)
+  );
 }
 
 function renderHistory() {
   const container = elements["history-list"];
   const t = currentStrings();
   container.replaceChildren();
-  if (state.history.length === 0) {
+  const query = state.query.trim().toLocaleLowerCase();
+  const entries = state.history
+    .map((entry, index) => ({ ...entry, index }))
+    .filter((entry) => !query || (entry.text || "").toLocaleLowerCase().includes(query));
+
+  if (entries.length === 0) {
     const empty = document.createElement("div");
     empty.className = "empty-state";
-    empty.textContent = t.emptyYet;
+    empty.textContent = query ? t.nothingFound : t.emptyYet;
     container.append(empty);
     return;
   }
 
-  state.history.forEach((entry, index) => {
-    const row = document.createElement("button");
-    row.type = "button";
-    row.className = "history-row";
-    if (!entry.text) {
-      row.classList.add("is-empty");
+  let card = null;
+  let currentDay = null;
+  entries.forEach((entry) => {
+    const day = dayKey(entry.recorded_at);
+    if (day !== currentDay) {
+      currentDay = day;
+      const header = document.createElement("h2");
+      header.className = "day-header";
+      header.textContent = dayLabel(entry.recorded_at, t);
+      card = document.createElement("div");
+      card.className = "card";
+      container.append(header, card);
     }
-    const text = document.createElement("span");
-    text.className = "history-text";
-    text.textContent = entry.text || t.noTextRow;
+    const row = document.createElement("div");
+    row.className = "history-row";
     const time = document.createElement("span");
     time.className = "history-time";
-    time.textContent = formatTimestamp(entry.recorded_at);
-    row.append(text, time);
-    row.addEventListener("click", () => copyDictation(index));
-    container.append(row);
+    time.textContent = timeLabel(entry.recorded_at);
+    const text = document.createElement("span");
+    text.className = "history-text";
+    text.textContent = entry.text || t.noText;
+    text.classList.toggle("is-empty", !entry.text);
+    row.append(time, text);
+    if (entry.text) {
+      const copy = document.createElement("button");
+      copy.type = "button";
+      const done = state.copiedIndex === entry.index;
+      copy.className = `history-copy${done ? " is-done" : ""}`;
+      copy.setAttribute("aria-label", done ? t.copied : t.copy);
+      copy.title = done ? t.copied : t.copy;
+      copy.append(iconUse(done ? "check" : "copy"));
+      copy.addEventListener("click", () => copyDictation(entry.index));
+      row.append(copy);
+    }
+    card.append(row);
   });
 }
 
 function renderAll() {
   elements["preview-banner"].hidden = !state.previewBannerVisible;
   renderText();
-  renderControls();
-  renderModel();
+  renderPanes();
+  renderGeneral();
+  renderRecognition();
   renderHistory();
-  elements["version-value"].textContent = state.version;
   renderErrors();
 }
 
@@ -477,98 +612,114 @@ function applySettings(nextSettings) {
   }
 }
 
+// ------------------------------------------------------- preview backend --
+
+function effectiveIn(settings) {
+  const fallback = settings.cloud_available ? "cloud" : "local";
+  switch (settings.transcription_mode) {
+    case "local":
+      return "local";
+    case "gemini":
+      return settings.gemini_api_key_set ? "gemini" : fallback;
+    case "openai":
+      return settings.openai_api_key_set ? "openai" : fallback;
+    default:
+      return fallback;
+  }
+}
+
 async function fixtureInvoke(command, args = {}) {
-  if (command === "get_settings") {
-    return { ...state.settings };
+  const settings = state.settings;
+  const reply = () => {
+    settings.effective_transcription_mode = effectiveIn(settings);
+    return { ...settings };
+  };
+  switch (command) {
+    case "get_settings":
+      return reply();
+    case "set_hotkey_mode":
+      settings.hotkey_mode = args.mode;
+      return reply();
+    case "set_hotkey_key":
+      settings.shortcut = args.shortcut;
+      return reply();
+    case "begin_hotkey_capture":
+    case "end_hotkey_capture":
+    case "copy_dictation":
+    case "open_history_folder":
+    case "open_key_page":
+    case "quit_app":
+      return undefined;
+    case "set_transcription_mode":
+      settings.transcription_mode = args.mode;
+      return reply();
+    case "set_local_model":
+      settings.local_model = args.model;
+      state.modelStatus = args.model === "multilingual" ? { kind: "ready" } : { kind: "missing" };
+      return reply();
+    case "set_language":
+      settings.language = args.language;
+      settings.resolved_language = args.language;
+      return reply();
+    case "set_play_sounds":
+      settings.play_sounds = args.enabled;
+      return reply();
+    case "set_sound_volume":
+      settings.sound_volume = args.percent;
+      return reply();
+    case "set_hud_placement":
+      settings.hud_placement = args.placement;
+      return reply();
+    case "set_wave_intensity":
+      settings.wave_intensity = args.intensity;
+      return reply();
+    case "set_autostart":
+      settings.autostart_enabled = args.enabled;
+      return reply();
+    case "set_gemini":
+      if (args.key !== null && args.key !== undefined) settings.gemini_api_key_set = args.key.trim() !== "";
+      if (args.smartMode !== null && args.smartMode !== undefined) settings.gemini_smart_mode = args.smartMode;
+      return reply();
+    case "set_openai":
+      if (args.key !== null && args.key !== undefined) settings.openai_api_key_set = args.key.trim() !== "";
+      if (args.model) settings.openai_model = args.model;
+      return reply();
+    case "recent_dictations":
+      return state.history.map((entry) => ({ ...entry }));
+    case "model_download_status":
+      if (state.modelStatus.kind === "downloading") {
+        const next = Math.min(1, state.modelStatus.fraction + 0.18);
+        state.modelStatus = next >= 1 ? { kind: "ready" } : { kind: "downloading", fraction: next };
+      }
+      return { ...state.modelStatus };
+    case "download_model":
+      state.modelStatus = { kind: "downloading", fraction: 0 };
+      return undefined;
+    case "app_version":
+      return state.version;
+    case "check_for_updates":
+      return { available: false, message: currentStrings().previewUpdateStatus };
+    default:
+      throw new Error(`Unsupported preview command: ${command}`);
   }
-  if (command === "set_hotkey_mode") {
-    state.settings.hotkey_mode = args.mode;
-    return { ...state.settings };
-  }
-  if (command === "set_hotkey_key") {
-    state.settings.shortcut = args.shortcut;
-    return { ...state.settings };
-  }
-  if (command === "begin_hotkey_capture" || command === "end_hotkey_capture") {
-    return undefined;
-  }
-  if (command === "set_transcription_mode") {
-    state.settings.transcription_mode = args.mode;
-    state.settings.effective_transcription_mode =
-      args.mode === "cloud" ? "local" : args.mode;
-    return { ...state.settings };
-  }
-  if (command === "set_local_model") {
-    state.settings.local_model = args.model;
-    state.modelStatus =
-      args.model === "multilingual" ? { kind: "ready" } : { kind: "missing" };
-    return { ...state.settings };
-  }
-  if (command === "set_language") {
-    state.settings.language = args.language;
-    state.settings.resolved_language = args.language;
-    return { ...state.settings };
-  }
-  if (command === "set_play_sounds") {
-    state.settings.play_sounds = args.enabled;
-    return { ...state.settings };
-  }
-  if (command === "set_autostart") {
-    state.settings.autostart_enabled = args.enabled;
-    return { ...state.settings };
-  }
-  if (command === "recent_dictations") {
-    return state.history.map((entry) => ({ ...entry }));
-  }
-  if (command === "copy_dictation") {
-    fixture.lastCopiedIndex = args.index;
-    return undefined;
-  }
-  if (command === "model_download_status") {
-    if (state.modelStatus.kind === "downloading") {
-      const nextFraction = Math.min(1, state.modelStatus.fraction + 0.18);
-      state.modelStatus =
-        nextFraction >= 1
-          ? { kind: "ready" }
-          : { kind: "downloading", fraction: nextFraction };
-    }
-    return { ...state.modelStatus };
-  }
-  if (command === "download_model") {
-    state.modelStatus = { kind: "downloading", fraction: 0 };
-    return undefined;
-  }
-  if (command === "open_history_folder") {
-    fixture.historyFolderOpened = true;
-    return undefined;
-  }
-  if (command === "app_version") {
-    return state.version;
-  }
-  if (command === "check_for_updates") {
-    return {
-      available: false,
-      message: currentStrings().previewUpdateStatus
-    };
-  }
-  throw new Error(`Unsupported preview command: ${command}`);
 }
 
 function invoke(command, args) {
   return tauriInvoke ? tauriInvoke(command, args) : fixtureInvoke(command, args);
 }
 
-async function setHotkeyMode() {
-  const previous = state.settings.hotkey_mode;
-  const mode = elements["hotkey-toggle"].checked ? "hold" : "toggle";
-  state.settings.hotkey_mode = mode;
-  setError("hotkey", null);
+/// Optimistic: the control moves at once, the backend's answer settles it, and a
+/// refusal puts the old settings back with the reason under the card.
+async function update(scope, change, command, args) {
+  const previous = { ...state.settings };
+  change(state.settings);
+  setError(scope, null);
   renderAll();
   try {
-    applySettings(await invoke("set_hotkey_mode", { mode }));
+    applySettings(await invoke(command, args));
   } catch (error) {
-    state.settings.hotkey_mode = previous;
-    setError("hotkey", error);
+    state.settings = previous;
+    setError(scope, error);
   }
   renderAll();
 }
@@ -725,7 +876,7 @@ function cancelRecording() {
     return;
   }
   stopRecording();
-  renderControls();
+  renderGeneral();
 }
 
 function onRecorderKeydown(event) {
@@ -817,7 +968,7 @@ async function commitShortcut(shortcut) {
   }
   state.rightShiftRejected = false;
   state.settings.shortcut = shortcut;
-  renderControls();
+  renderGeneral();
   try {
     applySettings(await invoke("set_hotkey_key", { shortcut }));
   } catch (error) {
@@ -826,99 +977,87 @@ async function commitShortcut(shortcut) {
   renderAll();
 }
 
-async function setTranscriptionMode(mode) {
-  const previous = { ...state.settings };
-  state.settings.transcription_mode = mode;
-  setError("recognition", null);
-  renderAll();
-  try {
-    applySettings(await invoke("set_transcription_mode", { mode }));
-    if (state.settings.effective_transcription_mode === "local") {
-      await refreshModelStatus();
+
+// -------------------------------------------------------------- actions --
+
+function setLanguage(language) {
+  const previous = state.language;
+  state.language = language;
+  return update(
+    "language",
+    (settings) => {
+      settings.language = language;
+      settings.resolved_language = language;
+    },
+    "set_language",
+    { language }
+  ).then(() => {
+    if (state.errors.controls) {
+      state.language = previous;
+      renderAll();
     }
-  } catch (error) {
-    state.settings = previous;
-    setError("recognition", error);
+  });
+}
+
+async function setTranscriptionMode(mode) {
+  await update("recognition", (s) => (s.transcription_mode = mode), "set_transcription_mode", { mode });
+  if (state.settings.effective_transcription_mode === "local") {
+    await refreshModelStatus();
   }
-  renderAll();
 }
 
 async function setLocalModel(model) {
-  const previous = { ...state.settings };
-  state.settings.local_model = model;
-  setError("model", null);
-  renderAll();
-  try {
-    applySettings(await invoke("set_local_model", { model }));
-    await refreshModelStatus();
-  } catch (error) {
-    state.settings = previous;
-    setError("model", error);
-  }
-  renderAll();
+  await update("model", (s) => (s.local_model = model), "set_local_model", { model });
+  await refreshModelStatus();
 }
 
-async function setLanguage(language) {
-  const previousLanguage = state.language;
-  const previousSettings = { ...state.settings };
-  state.language = language;
-  state.settings.language = language;
-  state.settings.resolved_language = language;
-  setError("language", null);
-  renderAll();
-  try {
-    applySettings(await invoke("set_language", { language }));
-  } catch (error) {
-    state.language = previousLanguage;
-    state.settings = previousSettings;
-    setError("language", error);
-  }
-  renderAll();
-}
-
-async function setSounds() {
-  const previous = state.settings.play_sounds;
-  const enabled = elements["sounds-toggle"].checked;
-  state.settings.play_sounds = enabled;
-  setError("sounds", null);
-  try {
-    applySettings(await invoke("set_play_sounds", { enabled }));
-  } catch (error) {
-    state.settings.play_sounds = previous;
-    setError("sounds", error);
-  }
-  renderAll();
-}
-
-async function setAutostart() {
-  const previous = state.settings.autostart_enabled;
-  const enabled = elements["autostart-toggle"].checked;
-  state.settings.autostart_enabled = enabled;
-  setError("autostart", null);
-  try {
-    applySettings(await invoke("set_autostart", { enabled }));
-  } catch (error) {
-    state.settings.autostart_enabled = previous;
-    setError("autostart", error);
-  }
-  renderAll();
+/// A pasted key goes to the backend on Enter or when the field is left; the field
+/// then empties, and only «Ключ сохранён» says one is there.
+function bindKeyField(provider) {
+  const input = elements[`${provider}-key`];
+  const clear = elements[`${provider}-key-clear`];
+  const flag = `${provider}_api_key_set`;
+  const save = async (key) => {
+    await update("recognition", (s) => (s[flag] = key.trim() !== ""), `set_${provider}`, { key });
+    input.value = "";
+    renderAll();
+  };
+  input.addEventListener("change", () => {
+    if (input.value.trim() !== "") {
+      save(input.value);
+    }
+  });
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      input.blur();
+    }
+  });
+  clear.addEventListener("click", () => save(""));
 }
 
 async function copyDictation(index) {
   setError("history", null);
   try {
     await invoke("copy_dictation", { index });
+    state.copiedIndex = index;
+    renderHistory();
+    window.setTimeout(() => {
+      if (state.copiedIndex === index) {
+        state.copiedIndex = null;
+        renderHistory();
+      }
+    }, 1500);
   } catch (error) {
     setError("history", error);
   }
 }
 
-async function openHistoryFolder() {
-  setError("history", null);
+async function simple(scope, command, args) {
+  setError(scope, null);
   try {
-    await invoke("open_history_folder");
+    await invoke(command, args);
   } catch (error) {
-    setError("history", error);
+    setError(scope, error);
   }
 }
 
@@ -947,13 +1086,19 @@ function scheduleModelPoll() {
 }
 
 async function downloadModel() {
-  setError("model", null);
+  await simple("model", "download_model");
+  await refreshModelStatus();
+}
+
+async function refreshHistory() {
   try {
-    await invoke("download_model");
-    await refreshModelStatus();
+    const history = await invoke("recent_dictations");
+    state.history = Array.isArray(history) ? history : [];
+    setError("history", null);
   } catch (error) {
-    setError("model", error);
+    setError("history", error);
   }
+  renderHistory();
 }
 
 async function checkForUpdates() {
@@ -966,9 +1111,19 @@ async function checkForUpdates() {
     state.updateMessage = result && result.message ? result.message : "";
     state.updateMessageIsPreview = !tauriInvoke;
   } catch (error) {
-    setError("updates", error);
+    state.updateMessage = errorMessage(error);
   }
   renderText();
+}
+
+function showPane(pane) {
+  state.pane = pane;
+  renderPanes();
+  byId("pane-" + pane).querySelector(".pane-title").focus({ preventScroll: true });
+  elements["history-search"].value = state.query;
+  if (pane === "history") {
+    refreshHistory();
+  }
 }
 
 function bindEvents() {
@@ -976,58 +1131,108 @@ function bindEvents() {
     state.previewBannerVisible = false;
     renderAll();
   });
-  elements["language-uz"].addEventListener("click", () => setLanguage("uz"));
-  elements["language-ru"].addEventListener("click", () => setLanguage("ru"));
-  elements["autostart-toggle"].addEventListener("change", setAutostart);
-  elements["sounds-toggle"].addEventListener("change", setSounds);
-  elements["hotkey-toggle"].addEventListener("change", setHotkeyMode);
-  elements["shortcut-recorder"].addEventListener("click", toggleRecorder);
-  elements["mode-cloud"].addEventListener("click", () =>
-    setTranscriptionMode("cloud")
-  );
-  elements["mode-local"].addEventListener("click", () =>
-    setTranscriptionMode("local")
-  );
-  elements["model-multilingual"].addEventListener("click", () =>
-    setLocalModel("multilingual")
-  );
-  elements["model-ru-en-punctuated"].addEventListener("click", () =>
-    setLocalModel("ru-en-punctuated")
-  );
-  elements["open-folder"].addEventListener("click", openHistoryFolder);
+  all(".nav-item").forEach((item) => {
+    item.addEventListener("click", () => showPane(item.dataset.pane));
+  });
+  elements["quit"].addEventListener("click", () => simple("general", "quit_app"));
   elements["check-updates"].addEventListener("click", checkForUpdates);
+
+  elements["shortcut-recorder"].addEventListener("click", toggleRecorder);
+  all("[data-hotkey-mode]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const mode = button.dataset.hotkeyMode;
+      update("hotkey", (s) => (s.hotkey_mode = mode), "set_hotkey_mode", { mode });
+    });
+  });
+  elements["open-recognition"].addEventListener("click", () => showPane("recognition"));
+  elements["back-to-general"].addEventListener("click", () => showPane("general"));
+  all("[data-wave]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const intensity = button.dataset.wave;
+      update("controls", (s) => (s.wave_intensity = intensity), "set_wave_intensity", { intensity });
+    });
+  });
+  all("[data-placement]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const placement = button.dataset.placement;
+      update("controls", (s) => (s.hud_placement = placement), "set_hud_placement", { placement });
+    });
+  });
+  const volume = elements["sound-volume"];
+  volume.addEventListener("input", () => volume.style.setProperty("--fill", `${volume.value}%`));
+  // Heard on release, at the new level (Mac slider).
+  volume.addEventListener("change", () => {
+    const percent = Number(volume.value);
+    update("sounds", (s) => (s.sound_volume = percent), "set_sound_volume", { percent });
+  });
+  elements["sounds-toggle"].addEventListener("change", (event) => {
+    const enabled = event.target.checked;
+    update("sounds", (s) => (s.play_sounds = enabled), "set_play_sounds", { enabled });
+  });
+  elements["autostart-toggle"].addEventListener("change", (event) => {
+    const enabled = event.target.checked;
+    update("autostart", (s) => (s.autostart_enabled = enabled), "set_autostart", { enabled });
+  });
+  elements["advanced-toggle"].addEventListener("click", () => {
+    state.advancedOpen = !state.advancedOpen;
+    renderGeneral();
+  });
+  all("[data-language]").forEach((button) => {
+    button.addEventListener("click", () => setLanguage(button.dataset.language));
+  });
+
+  all("[data-mode]").forEach((button) => {
+    button.addEventListener("click", () => setTranscriptionMode(button.dataset.mode));
+  });
+  bindKeyField("gemini");
+  bindKeyField("openai");
+  elements["gemini-smart"].addEventListener("change", (event) => {
+    const smartMode = event.target.checked;
+    update("recognition", (s) => (s.gemini_smart_mode = smartMode), "set_gemini", { key: null, smartMode });
+  });
+  all("[data-openai-model]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const model = button.dataset.openaiModel;
+      update("recognition", (s) => (s.openai_model = model), "set_openai", { key: null, model });
+    });
+  });
+  all("[data-key-page]").forEach((button) => {
+    button.addEventListener("click", () =>
+      simple("recognition", "open_key_page", { provider: button.dataset.keyPage })
+    );
+  });
+  all("[data-model]").forEach((button) => {
+    button.addEventListener("click", () => setLocalModel(button.dataset.model));
+  });
+
+  elements["open-folder"].addEventListener("click", () => simple("history", "open_history_folder"));
+  elements["history-search"].addEventListener("input", (event) => {
+    state.query = event.target.value;
+    renderHistory();
+  });
+  // The window stays alive in the tray; coming back to it shows fresh dictations.
+  window.addEventListener("focus", () => {
+    if (state.pane === "history") {
+      refreshHistory();
+    }
+  });
 }
 
 async function loadInitialData() {
   const tasks = [
-    invoke("get_settings")
-      .then((settings) => {
-        applySettings(settings);
-      })
-      .catch((error) => {
-        setError("general", error);
-      }),
-    invoke("model_download_status")
-      .then((status) => {
-        state.modelStatus = status;
-      })
-      .catch((error) => {
-        setError("model", error);
-      }),
-    invoke("recent_dictations")
-      .then((history) => {
-        state.history = Array.isArray(history) ? history : [];
-      })
-      .catch((error) => {
-        setError("history", error);
-      }),
-    invoke("app_version")
-      .then((version) => {
-        state.version = String(version);
-      })
-      .catch((error) => {
-        setError("updates", error);
-      })
+    invoke("get_settings").then(applySettings, (error) => setError("general", error)),
+    invoke("model_download_status").then(
+      (status) => (state.modelStatus = status),
+      (error) => setError("model", error)
+    ),
+    invoke("recent_dictations").then(
+      (history) => (state.history = Array.isArray(history) ? history : []),
+      (error) => setError("history", error)
+    ),
+    invoke("app_version").then(
+      (version) => (state.version = String(version)),
+      () => {}
+    )
   ];
   await Promise.all(tasks);
   renderAll();
@@ -1037,12 +1242,14 @@ async function loadInitialData() {
 }
 
 function start() {
+  if (tauriInvoke) {
+    document.documentElement.dataset.shell = "tauri";
+  }
+  all(".pane-title").forEach((title) => title.setAttribute("tabindex", "-1"));
   cacheElements();
   bindEvents();
   renderAll();
-  loadInitialData().catch((error) => {
-    setError("general", error);
-  });
+  loadInitialData().catch((error) => setError("general", error));
 }
 
 start();
