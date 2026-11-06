@@ -111,7 +111,7 @@ pub enum State {
 /// Result of finishing one dictation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Outcome {
-    /// No dictation was active, or the captured audio was too short.
+    /// No dictation was active, or the captured audio was too short or held no speech.
     Ignored,
     /// The transcript was recorded in history and inserted.
     Inserted,
@@ -185,6 +185,7 @@ where
         let outcome = match self.mic.stop().await {
             Err(_) => Outcome::Failed,
             Ok(samples) if samples.len() < Self::MINIMUM_SAMPLES => Outcome::Ignored,
+            Ok(samples) if feedback::SilenceGate::is_near_silent(&samples) => Outcome::Ignored,
             Ok(samples) => match self.transcriber.transcribe(&samples).await {
                 Ok(text) if !text.is_empty() => {
                     let _ = self.history.record(&text, &samples).await;
