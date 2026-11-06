@@ -1,3 +1,4 @@
+pub mod gemini;
 pub mod openai;
 use reqwest::Client;
 use serde::Deserialize;
