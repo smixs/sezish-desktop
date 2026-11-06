@@ -17,6 +17,8 @@ pub struct SettingsDto {
     /// The key itself stays in the backend; the UI only learns whether one is set.
     pub openai_api_key_set: bool,
     pub openai_model: &'static str,
+    pub gemini_api_key_set: bool,
+    pub gemini_smart_mode: bool,
     pub autostart_enabled: bool,
 }
 

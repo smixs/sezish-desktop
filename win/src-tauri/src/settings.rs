@@ -21,6 +21,8 @@ pub enum TranscriptionPreference {
     Local,
     /// The user's own OpenAI key (Mac `.openai`).
     Openai,
+    /// The user's own Google AI Studio key (Mac `.gemini`).
+    Gemini,
 }
 
 /// Mac `OpenAIModel`, stored by its API name.
@@ -78,6 +80,16 @@ pub struct Settings {
     pub openai_api_key: Option<String>,
     #[serde(with = "by_name::openai_model", default)]
     pub openai_model: OpenAiModel,
+    /// Kept trimmed; set through `set_gemini_api_key`.
+    #[serde(default)]
+    pub gemini_api_key: Option<String>,
+    /// SMART cleans the text up, off is VERBATIM (Mac `geminiSmartMode`, on by default).
+    #[serde(default = "default_true")]
+    pub gemini_smart_mode: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 /// Stored by name, read back leniently: an unknown name is the default.
@@ -129,6 +141,8 @@ impl Default for Settings {
             wave_intensity: WaveIntensity::Lively,
             openai_api_key: None,
             openai_model: OpenAiModel::Transcribe,
+            gemini_api_key: None,
+            gemini_smart_mode: true,
         }
     }
 }
@@ -204,13 +218,22 @@ impl Settings {
         {
             settings.openai_model = model;
         }
+        if let Some(key) = value.get("gemini_api_key").and_then(Value::as_str) {
+            settings.set_gemini_api_key(key);
+        }
+        if let Some(smart) = value.get("gemini_smart_mode").and_then(Value::as_bool) {
+            settings.gemini_smart_mode = smart;
+        }
         settings
     }
 
     /// A pasted key: surrounding whitespace goes, an empty field means no key.
     pub fn set_openai_api_key(&mut self, raw: &str) {
-        let trimmed = raw.trim();
-        self.openai_api_key = (!trimmed.is_empty()).then(|| trimmed.to_owned());
+        self.openai_api_key = pasted_key(raw);
+    }
+
+    pub fn set_gemini_api_key(&mut self, raw: &str) {
+        self.gemini_api_key = pasted_key(raw);
     }
 
     pub fn save(&self, path: &Path) -> Result<(), std::io::Error> {
@@ -220,6 +243,11 @@ impl Settings {
         let data = serde_json::to_vec_pretty(self).map_err(std::io::Error::other)?;
         fs::write(path, data)
     }
+}
+
+fn pasted_key(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    (!trimmed.is_empty()).then(|| trimmed.to_owned())
 }
 
 pub fn settings_path() -> PathBuf {
@@ -235,6 +263,7 @@ pub fn effective_transcription_mode(
     preference: TranscriptionPreference,
     has_cloud_credentials: bool,
     has_openai_key: bool,
+    has_gemini_key: bool,
 ) -> TranscriptionPreference {
     let fallback = if has_cloud_credentials {
         TranscriptionPreference::Cloud
@@ -246,6 +275,8 @@ pub fn effective_transcription_mode(
         TranscriptionPreference::Cloud => fallback,
         TranscriptionPreference::Openai if has_openai_key => TranscriptionPreference::Openai,
         TranscriptionPreference::Openai => fallback,
+        TranscriptionPreference::Gemini if has_gemini_key => TranscriptionPreference::Gemini,
+        TranscriptionPreference::Gemini => fallback,
     }
 }
 
@@ -441,10 +472,19 @@ mod tests {
     #[test]
     fn cloud_preference_degrades_to_local_without_baked_credentials() {
         use TranscriptionPreference::{Cloud, Local};
-        assert_eq!(effective_transcription_mode(Cloud, true, false, false), Cloud);
-        assert_eq!(effective_transcription_mode(Cloud, false, false, false), Local);
+        assert_eq!(
+            effective_transcription_mode(Cloud, true, false, false),
+            Cloud
+        );
+        assert_eq!(
+            effective_transcription_mode(Cloud, false, false, false),
+            Local
+        );
         assert_eq!(effective_transcription_mode(Local, true, true, true), Local);
-        assert_eq!(effective_transcription_mode(Local, false, false, false), Local);
+        assert_eq!(
+            effective_transcription_mode(Local, false, false, false),
+            Local
+        );
     }
 
     /// Mac `effectiveTranscriptionMode`: OpenAI without a key falls back like the
@@ -452,19 +492,43 @@ mod tests {
     #[test]
     fn openai_needs_a_key_and_falls_back_like_the_cloud() {
         use TranscriptionPreference::{Cloud, Local, Openai};
-        assert_eq!(effective_transcription_mode(Openai, true, true, false), Openai);
-        assert_eq!(effective_transcription_mode(Openai, false, true, false), Openai);
-        assert_eq!(effective_transcription_mode(Openai, true, false, true), Cloud);
-        assert_eq!(effective_transcription_mode(Openai, false, false, true), Local);
+        assert_eq!(
+            effective_transcription_mode(Openai, true, true, false),
+            Openai
+        );
+        assert_eq!(
+            effective_transcription_mode(Openai, false, true, false),
+            Openai
+        );
+        assert_eq!(
+            effective_transcription_mode(Openai, true, false, true),
+            Cloud
+        );
+        assert_eq!(
+            effective_transcription_mode(Openai, false, false, true),
+            Local
+        );
     }
 
     #[test]
     fn gemini_needs_its_own_key_and_falls_back_like_the_cloud() {
         use TranscriptionPreference::{Cloud, Gemini, Local};
-        assert_eq!(effective_transcription_mode(Gemini, true, false, true), Gemini);
-        assert_eq!(effective_transcription_mode(Gemini, false, false, true), Gemini);
-        assert_eq!(effective_transcription_mode(Gemini, true, true, false), Cloud);
-        assert_eq!(effective_transcription_mode(Gemini, false, true, false), Local);
+        assert_eq!(
+            effective_transcription_mode(Gemini, true, false, true),
+            Gemini
+        );
+        assert_eq!(
+            effective_transcription_mode(Gemini, false, false, true),
+            Gemini
+        );
+        assert_eq!(
+            effective_transcription_mode(Gemini, true, true, false),
+            Cloud
+        );
+        assert_eq!(
+            effective_transcription_mode(Gemini, false, true, false),
+            Local
+        );
     }
 
     /// Mac `geminiSmartMode` defaults to on; the key is trimmed like OpenAI's.
@@ -543,7 +607,10 @@ mod tests {
     fn openai_models_carry_the_api_names() {
         assert_eq!(OpenAiModel::Transcribe.name(), "gpt-transcribe");
         assert_eq!(OpenAiModel::Mini.name(), "gpt-4o-mini-transcribe");
-        assert_eq!(OpenAiModel::from_name("gpt-4o-mini-transcribe"), Some(OpenAiModel::Mini));
+        assert_eq!(
+            OpenAiModel::from_name("gpt-4o-mini-transcribe"),
+            Some(OpenAiModel::Mini)
+        );
         assert_eq!(OpenAiModel::from_name("whisper-1"), None);
     }
 

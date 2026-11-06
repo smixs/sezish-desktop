@@ -238,7 +238,10 @@ mod tests {
     fn modes_carry_the_mac_names_and_prompts() {
         assert_eq!(GeminiMode::Smart.name(), "SMART");
         assert_eq!(GeminiMode::Verbatim.name(), "VERBATIM");
-        assert_eq!(GeminiMode::from_name("VERBATIM"), Some(GeminiMode::Verbatim));
+        assert_eq!(
+            GeminiMode::from_name("VERBATIM"),
+            Some(GeminiMode::Verbatim)
+        );
         assert_eq!(GeminiMode::from_name("smart"), None);
         assert_eq!(GeminiMode::default(), GeminiMode::Smart);
 
@@ -288,7 +291,10 @@ mod tests {
             GeminiMode::Smart,
         );
 
-        assert_eq!(transcriber.transcribe(&take()).await.unwrap(), "Привет, как дела?");
+        assert_eq!(
+            transcriber.transcribe(&take()).await.unwrap(),
+            "Привет, как дела?"
+        );
         post.assert_calls_async(1).await;
         // The key never travels in the URL: error text and logs quote URLs.
         assert!(!transcriber.endpoint().contains("g-test"));
@@ -300,7 +306,9 @@ mod tests {
             "candidates": [{ "content": { "parts": [] }, "finishReason": "SAFETY" }]
         });
         assert_eq!(
-            transcript(blocked.to_string().as_bytes()).unwrap_err().to_string(),
+            transcript(blocked.to_string().as_bytes())
+                .unwrap_err()
+                .to_string(),
             "Gemini не отдал текст (SAFETY)."
         );
         let empty = reply("  ");
@@ -315,7 +323,10 @@ mod tests {
         let joined = serde_json::json!({
             "candidates": [{ "content": { "parts": [{ "text": "раз " }, { "text": "два" }] } }]
         });
-        assert_eq!(transcript(joined.to_string().as_bytes()).unwrap(), "раз два");
+        assert_eq!(
+            transcript(joined.to_string().as_bytes()).unwrap(),
+            "раз два"
+        );
     }
 
     #[tokio::test]
@@ -323,7 +334,8 @@ mod tests {
         let server = MockServer::start_async().await;
         server
             .mock_async(|_, then| {
-                then.status(400).body("API key not valid. Please pass a valid API key.");
+                then.status(400)
+                    .body("API key not valid. Please pass a valid API key.");
             })
             .await;
         let error = GeminiTranscriber::with_endpoint(server.url("/"), "bad", GeminiMode::Smart)
@@ -351,7 +363,10 @@ mod tests {
 
         let error = transcriber.transcribe(&ten_minutes).await.unwrap_err();
 
-        assert_eq!(error.to_string(), "Запись слишком длинная для Gemini: 600 с.");
+        assert_eq!(
+            error.to_string(),
+            "Запись слишком длинная для Gemini: 600 с."
+        );
         post.assert_calls_async(0).await;
     }
 
@@ -368,7 +383,9 @@ mod tests {
             GeminiTranscriber::with_endpoint(server.url("/"), "k", GeminiMode::Verbatim);
         transcriber.warmup();
         assert_eq!(
-            Transcriber::transcribe(&transcriber, &take()).await.unwrap(),
+            Transcriber::transcribe(&transcriber, &take())
+                .await
+                .unwrap(),
             "salom"
         );
         assert_eq!(transcriber.transcribe(&[]).await.unwrap(), "");

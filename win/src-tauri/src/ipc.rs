@@ -106,6 +106,15 @@ pub async fn set_openai(
 }
 
 #[tauri::command]
+pub async fn set_gemini(
+    controller: State<'_, Arc<AppController>>,
+    key: Option<String>,
+    smart_mode: Option<bool>,
+) -> Result<SettingsDto, AppError> {
+    controller.set_gemini(key, smart_mode).await
+}
+
+#[tauri::command]
 pub async fn set_sound_volume(
     controller: State<'_, Arc<AppController>>,
     percent: u8,
@@ -253,8 +262,9 @@ fn parse_transcription_mode(mode: &str) -> Result<TranscriptionPreference, AppEr
         "cloud" => Ok(TranscriptionPreference::Cloud),
         "local" => Ok(TranscriptionPreference::Local),
         "openai" => Ok(TranscriptionPreference::Openai),
+        "gemini" => Ok(TranscriptionPreference::Gemini),
         _ => Err(AppError::invalid(
-            "transcription mode must be \"cloud\", \"local\" or \"openai\"",
+            "transcription mode must be \"cloud\", \"local\", \"openai\" or \"gemini\"",
         )),
     }
 }

@@ -204,6 +204,7 @@ impl TrayUi {
         let remote = match effective_mode {
             TranscriptionPreference::Cloud => Some("Transcription: Cloud"),
             TranscriptionPreference::Openai => Some("Transcription: OpenAI"),
+            TranscriptionPreference::Gemini => Some("Transcription: Gemini"),
             TranscriptionPreference::Local => None,
         };
         if let Some(remote) = remote {

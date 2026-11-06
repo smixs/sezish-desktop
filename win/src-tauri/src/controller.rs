@@ -14,6 +14,7 @@ use crate::settings::{
 };
 use crate::tray::{TrayPhase, TrayUi};
 use async_trait::async_trait;
+use sez_asr_cloud::gemini::{GeminiMode, GeminiTranscriber};
 use sez_asr_cloud::openai::OpenAiTranscriber;
 use sez_asr_cloud::CloudTranscriber;
 use sez_asr_local::{AsrModel, LocalTranscriber, ModelDownloader, ModelStore};
@@ -39,6 +40,7 @@ enum ActiveTranscriber {
     Cloud(CloudTranscriber),
     Local(LocalTranscriber),
     OpenAi(OpenAiTranscriber),
+    Gemini(GeminiTranscriber),
 }
 
 #[async_trait]
@@ -48,6 +50,7 @@ impl Transcriber for ActiveTranscriber {
             Self::Cloud(transcriber) => transcriber.warmup(),
             Self::Local(transcriber) => transcriber.warmup(),
             Self::OpenAi(transcriber) => transcriber.warmup(),
+            Self::Gemini(transcriber) => transcriber.warmup(),
         }
     }
 
@@ -56,6 +59,7 @@ impl Transcriber for ActiveTranscriber {
             Self::Cloud(transcriber) => Transcriber::transcribe(transcriber, samples).await,
             Self::Local(transcriber) => Transcriber::transcribe(transcriber, samples).await,
             Self::OpenAi(transcriber) => Transcriber::transcribe(transcriber, samples).await,
+            Self::Gemini(transcriber) => Transcriber::transcribe(transcriber, samples).await,
         }
     }
 }
@@ -477,6 +481,30 @@ impl AppController {
         self.settings().await
     }
 
+    /// A new key or mode is a new engine even when the mode stays Gemini.
+    pub async fn set_gemini(
+        &self,
+        key: Option<String>,
+        smart_mode: Option<bool>,
+    ) -> Result<SettingsDto, AppError> {
+        {
+            let mut runtime = self.runtime.lock().await;
+            if let Some(key) = key {
+                runtime.settings.set_gemini_api_key(&key);
+            }
+            if let Some(smart_mode) = smart_mode {
+                runtime.settings.gemini_smart_mode = smart_mode;
+            }
+            runtime.settings.save(&self.settings_path)?;
+            if runtime.coordinator_mode == Some(TranscriptionPreference::Gemini) {
+                runtime.coordinator_mode = None;
+            }
+            self.apply_pending_mode_locked(&mut runtime)?;
+        }
+        self.refresh_model_menu().await;
+        self.settings().await
+    }
+
     pub async fn set_sound_volume(&self, percent: u8) -> Result<SettingsDto, AppError> {
         {
             let mut runtime = self.runtime.lock().await;
@@ -626,6 +654,7 @@ impl AppController {
             settings.transcription_mode,
             self.cloud_credentials.is_some(),
             settings.openai_api_key.is_some(),
+            settings.gemini_api_key.is_some(),
         )
     }
 
@@ -646,6 +675,8 @@ impl AppController {
             sound_volume: settings.sound_volume,
             openai_api_key_set: settings.openai_api_key.is_some(),
             openai_model: settings.openai_model.name(),
+            gemini_api_key_set: settings.gemini_api_key.is_some(),
+            gemini_smart_mode: settings.gemini_smart_mode,
             autostart_enabled: autostart_enabled()?,
         })
     }
@@ -670,13 +701,28 @@ impl AppController {
                 ))
             }
             TranscriptionPreference::Openai => {
-                let key = runtime.settings.openai_api_key.clone().ok_or_else(|| {
-                    AppError::not_ready("OpenAI key is not set")
-                })?;
+                let key = runtime
+                    .settings
+                    .openai_api_key
+                    .clone()
+                    .ok_or_else(|| AppError::not_ready("OpenAI key is not set"))?;
                 ActiveTranscriber::OpenAi(OpenAiTranscriber::new(
                     key,
                     runtime.settings.openai_model.name(),
                 ))
+            }
+            TranscriptionPreference::Gemini => {
+                let key = runtime
+                    .settings
+                    .gemini_api_key
+                    .clone()
+                    .ok_or_else(|| AppError::not_ready("Gemini key is not set"))?;
+                let mode = if runtime.settings.gemini_smart_mode {
+                    GeminiMode::Smart
+                } else {
+                    GeminiMode::Verbatim
+                };
+                ActiveTranscriber::Gemini(GeminiTranscriber::new(key, mode))
             }
             TranscriptionPreference::Local if !self.model_store().is_ready() => {
                 runtime.coordinator = None;
@@ -734,7 +780,9 @@ impl AppController {
         // speaking, so releasing the hotkey only leaves the tail to transcribe.
         let local = match &transcriber {
             ActiveTranscriber::Local(local) => Some(local.clone()),
-            ActiveTranscriber::Cloud(_) | ActiveTranscriber::OpenAi(_) => None,
+            ActiveTranscriber::Cloud(_)
+            | ActiveTranscriber::OpenAi(_)
+            | ActiveTranscriber::Gemini(_) => None,
         };
         let level = self.level.clone();
         let armed = self.capture_armed.clone();
