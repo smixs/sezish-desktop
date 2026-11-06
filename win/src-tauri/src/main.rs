@@ -18,6 +18,7 @@ mod model_idle;
 mod obs;
 mod platform;
 mod settings;
+mod sounds;
 mod tray;
 
 fn main() {

@@ -172,8 +172,27 @@ mod tests {
                 local_model: AsrModel::RuEnPunctuated,
                 language: Some(AppLanguage::Uz),
                 play_sounds: false,
+                sound_volume: 50,
             }
         );
+    }
+
+    /// Mac: `soundVolume` 0…1, default 0.5. Stored here as a percent so the
+    /// settings stay comparable; anything out of range is pulled back in.
+    #[test]
+    fn sound_volume_defaults_to_half_and_is_clamped() {
+        let directory = TempDir::new().expect("temporary directory should be created");
+        let path = directory.path().join("settings.json");
+        assert_eq!(Settings::default().sound_volume, 50);
+
+        fs::write(&path, r#"{ "sound_volume": 30 }"#).expect("fixture should be written");
+        assert_eq!(Settings::load(&path).sound_volume, 30);
+
+        fs::write(&path, r#"{ "sound_volume": 300 }"#).expect("fixture should be written");
+        assert_eq!(Settings::load(&path).sound_volume, 100);
+
+        fs::write(&path, r#"{ "sound_volume": -5 }"#).expect("fixture should be written");
+        assert_eq!(Settings::load(&path).sound_volume, 50);
     }
 
     #[test]
@@ -242,6 +261,7 @@ mod tests {
                 local_model: AsrModel::Multilingual,
                 language: None,
                 play_sounds: true,
+                sound_volume: 50,
             }
         );
     }
