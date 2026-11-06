@@ -19,6 +19,10 @@ pub struct SettingsDto {
     pub openai_model: &'static str,
     pub gemini_api_key_set: bool,
     pub gemini_smart_mode: bool,
+    pub hud_placement: &'static str,
+    pub wave_intensity: &'static str,
+    /// Builds without baked cloud credentials do not offer the cloud at all.
+    pub cloud_available: bool,
     pub autostart_enabled: bool,
 }
 

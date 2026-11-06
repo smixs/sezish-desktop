@@ -504,6 +504,31 @@ impl AppController {
         self.settings().await
     }
 
+    /// Takes effect on the next dictation, where the HUD is placed anew.
+    pub async fn set_hud_placement(
+        &self,
+        placement: crate::hud::HudPlacement,
+    ) -> Result<SettingsDto, AppError> {
+        {
+            let mut runtime = self.runtime.lock().await;
+            runtime.settings.hud_placement = placement;
+            runtime.settings.save(&self.settings_path)?;
+        }
+        self.settings().await
+    }
+
+    pub async fn set_wave_intensity(
+        &self,
+        intensity: sez_core::wave::WaveIntensity,
+    ) -> Result<SettingsDto, AppError> {
+        {
+            let mut runtime = self.runtime.lock().await;
+            runtime.settings.wave_intensity = intensity;
+            runtime.settings.save(&self.settings_path)?;
+        }
+        self.settings().await
+    }
+
     /// Saved and heard at once, like the Mac slider on release.
     pub async fn set_sound_volume(&self, percent: u8) -> Result<SettingsDto, AppError> {
         {
@@ -677,6 +702,9 @@ impl AppController {
             openai_model: settings.openai_model.name(),
             gemini_api_key_set: settings.gemini_api_key.is_some(),
             gemini_smart_mode: settings.gemini_smart_mode,
+            hud_placement: settings.hud_placement.name(),
+            wave_intensity: settings.wave_intensity.name(),
+            cloud_available: self.cloud_credentials.is_some(),
             autostart_enabled: autostart_enabled()?,
         })
     }

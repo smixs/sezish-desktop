@@ -3,8 +3,10 @@ use crate::dto::{
     DictationEntryDto, DictationOutcomeDto, ModelStatusDto, SettingsDto, UpdateCheckDto,
 };
 use crate::error::AppError;
+use crate::hud::HudPlacement;
 use crate::settings::{AppLanguage, HotkeyPreference, OpenAiModel, TranscriptionPreference};
 use sez_asr_local::AsrModel;
+use sez_core::wave::WaveIntensity;
 use sez_hotkey::{vk, Shortcut};
 use std::sync::Arc;
 use tauri::State;
@@ -112,6 +114,32 @@ pub async fn set_gemini(
     smart_mode: Option<bool>,
 ) -> Result<SettingsDto, AppError> {
     controller.set_gemini(key, smart_mode).await
+}
+
+#[tauri::command]
+pub async fn set_hud_placement(
+    controller: State<'_, Arc<AppController>>,
+    placement: String,
+) -> Result<SettingsDto, AppError> {
+    controller
+        .set_hud_placement(parse_hud_placement(&placement)?)
+        .await
+}
+
+#[tauri::command]
+pub async fn set_wave_intensity(
+    controller: State<'_, Arc<AppController>>,
+    intensity: String,
+) -> Result<SettingsDto, AppError> {
+    controller
+        .set_wave_intensity(parse_wave_intensity(&intensity)?)
+        .await
+}
+
+/// «Выйти из sezish» at the foot of the settings sidebar, as on the Mac.
+#[tauri::command]
+pub fn quit_app(app: tauri::AppHandle) {
+    app.exit(0);
 }
 
 #[tauri::command]
@@ -277,6 +305,16 @@ fn parse_local_model(model: &str) -> Result<AsrModel, AppError> {
             "local model must be either \"multilingual\" or \"ru-en-punctuated\"",
         )),
     }
+}
+
+fn parse_hud_placement(name: &str) -> Result<HudPlacement, AppError> {
+    HudPlacement::from_name(name)
+        .ok_or_else(|| AppError::invalid(format!("unknown HUD placement {name}")))
+}
+
+fn parse_wave_intensity(name: &str) -> Result<WaveIntensity, AppError> {
+    WaveIntensity::from_name(name)
+        .ok_or_else(|| AppError::invalid(format!("unknown wave intensity {name}")))
 }
 
 fn parse_language(language: &str) -> Result<AppLanguage, AppError> {
